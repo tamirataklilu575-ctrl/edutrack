@@ -1,4 +1,6 @@
 # 🎓 EduTrack
+- User registration and login with securely hashed passwords
+- Protected pages: only logged-in users can view or manage students
 
 > Simple student records, managed well.
 **🔗 Live Demo:** https://edutrack-xxxx.onrender.com
@@ -91,7 +93,7 @@ Tests use a temporary database, so your real data is never modified.
 - [x] SQLite persistence
 - [x] Validation, flash messages, and 404 page
 - [x] Automated tests
-- [ ] User authentication
+- [x] User authentication
 - [ ] Pagination
 - [ ] Deployment
 

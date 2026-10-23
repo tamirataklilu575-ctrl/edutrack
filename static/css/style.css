@@ -285,3 +285,58 @@ th {
     margin: 12px 0 24px;
     color: var(--muted);
 }
+/* Authentication */
+.auth-wrapper {
+    display: flex;
+    justify-content: center;
+    padding-top: 40px;
+}
+
+.auth-wrapper .form-panel {
+    width: 100%;
+    max-width: 420px;
+}
+
+.auth-switch {
+    margin-top: 20px;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.auth-switch a {
+    color: var(--primary);
+}
+
+.flash-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+/* Sidebar user area */
+.sidebar {
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-user {
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid #374151;
+}
+
+.user-name {
+    display: block;
+    padding: 0 14px 10px;
+    color: #d1d5db;
+    font-size: 0.9rem;
+}
+
+.logout-form button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+}

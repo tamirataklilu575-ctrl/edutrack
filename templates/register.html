@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Register{% endblock %}
+
+{% block content %}
+<div class="auth-wrapper">
+    <section class="panel form-panel">
+        <header class="page-header">
+            <h2>Create Account</h2>
+            <p>Register to start using EduTrack.</p>
+        </header>
+
+        <form method="POST" novalidate>
+            <div class="form-group {{ 'has-error' if errors.username }}">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username"
+                       value="{{ form.username }}" autofocus>
+                {% if errors.username %}<span class="error-text">{{ errors.username }}</span>{% endif %}
+            </div>
+
+            <div class="form-group {{ 'has-error' if errors.password }}">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password">
+                {% if errors.password %}<span class="error-text">{{ errors.password }}</span>{% endif %}
+            </div>
+
+            <div class="form-group {{ 'has-error' if errors.confirm }}">
+                <label for="confirm">Confirm Password</label>
+                <input type="password" id="confirm" name="confirm">
+                {% if errors.confirm %}<span class="error-text">{{ errors.confirm }}</span>{% endif %}
+            </div>
+
+            <button type="submit" class="btn">Register</button>
+        </form>
+
+        <p class="auth-switch">
+            Already have an account? <a href="{{ url_for('login') }}">Log in</a>
+        </p>
+    </section>
+</div>
+{% endblock %}

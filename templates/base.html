@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+    {% if session.get('user_id') %}
     <aside class="sidebar">
         <h1 class="logo">🎓 EduTrack</h1>
         <nav>
@@ -15,7 +16,15 @@
             <a href="{{ url_for('student_list') }}"
                class="nav-link {{ 'active' if request.endpoint in ['student_list', 'add_student', 'edit_student'] }}">Students</a>
         </nav>
+
+        <div class="sidebar-user">
+            <span class="user-name">👤 {{ session.get('username') }}</span>
+            <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
+                <button type="submit" class="nav-link">Log out</button>
+            </form>
+        </div>
     </aside>
+    {% endif %}
 
     <main class="content">
         {% with messages = get_flashed_messages(with_categories=true) %}
