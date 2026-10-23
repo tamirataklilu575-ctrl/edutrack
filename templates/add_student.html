@@ -9,25 +9,26 @@
 </header>
 
 <section class="panel form-panel">
-    <form method="POST">
-        <div class="form-group">
+    <form method="POST" novalidate>
+        <div class="form-group {{ 'has-error' if errors.name }}">
             <label for="name">Full Name</label>
-            <input type="text" id="name" name="name"
-                   value="{{ student.name if student else '' }}" required>
+            <input type="text" id="name" name="name" value="{{ form.name }}">
+            {% if errors.name %}<span class="error-text">{{ errors.name }}</span>{% endif %}
         </div>
 
-        <div class="form-group">
+        <div class="form-group {{ 'has-error' if errors.course }}">
             <label for="course">Course</label>
-            <input type="text" id="course" name="course"
-                   value="{{ student.course if student else '' }}" required>
+            <input type="text" id="course" name="course" value="{{ form.course }}">
+            {% if errors.course %}<span class="error-text">{{ errors.course }}</span>{% endif %}
         </div>
 
-        <div class="form-group">
+        <div class="form-group {{ 'has-error' if errors.status }}">
             <label for="status">Status</label>
             <select id="status" name="status">
-                <option value="Active" {{ 'selected' if student and student.status == 'Active' }}>Active</option>
-                <option value="Inactive" {{ 'selected' if student and student.status == 'Inactive' }}>Inactive</option>
+                <option value="Active" {{ 'selected' if form.status == 'Active' }}>Active</option>
+                <option value="Inactive" {{ 'selected' if form.status == 'Inactive' }}>Inactive</option>
             </select>
+            {% if errors.status %}<span class="error-text">{{ errors.status }}</span>{% endif %}
         </div>
 
         <button type="submit" class="btn">Save Student</button>

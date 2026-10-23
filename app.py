@@ -1,4 +1,4 @@
-"""EduTrack - Student Management System (Phase 3: SQLite Database)."""
+"""EduTrack - Student Management System (Phase 4A: Validation)."""
 
 import sqlite3
 from pathlib import Path
@@ -8,6 +8,10 @@ from flask import Flask, abort, redirect, render_template, request, url_for
 app = Flask(__name__)
 
 DATABASE = Path(__file__).parent / "edutrack.db"
+
+VALID_STATUSES = ("Active", "Inactive")
+MIN_LENGTH = 2
+MAX_LENGTH = 100
 
 SEED_STUDENTS = [
     ("Abebe Kebede", "Computer Science", "Active"),
@@ -43,7 +47,30 @@ def init_db():
                 "INSERT INTO students (name, course, status) VALUES (?, ?, ?)",
                 SEED_STUDENTS,
             )
-    # `with` commits the transaction but does not close the connection.
+
+
+def validate_student(name, course, status):
+    """Return a dict of field errors. An empty dict means the data is valid."""
+    errors = {}
+
+    if not name:
+        errors["name"] = "Full name is required."
+    elif len(name) < MIN_LENGTH:
+        errors["name"] = f"Full name must be at least {MIN_LENGTH} characters."
+    elif len(name) > MAX_LENGTH:
+        errors["name"] = f"Full name must be at most {MAX_LENGTH} characters."
+
+    if not course:
+        errors["course"] = "Course is required."
+    elif len(course) < MIN_LENGTH:
+        errors["course"] = f"Course must be at least {MIN_LENGTH} characters."
+    elif len(course) > MAX_LENGTH:
+        errors["course"] = f"Course must be at most {MAX_LENGTH} characters."
+
+    if status not in VALID_STATUSES:
+        errors["status"] = "Please choose a valid status."
+
+    return errors
 
 
 @app.route("/")
@@ -96,24 +123,30 @@ def student_list():
 @app.route("/students/add", methods=["GET", "POST"])
 def add_student():
     """Show the add-student form (GET) and save a new student (POST)."""
-    if request.method == "POST":
-        name = request.form["name"].strip()
-        course = request.form["course"].strip()
-        status = request.form["status"]
+    errors = {}
+    form = {"name": "", "course": "", "status": "Active"}
 
-        if name and course:
+    if request.method == "POST":
+        form = {
+            "name": request.form.get("name", "").strip(),
+            "course": request.form.get("course", "").strip(),
+            "status": request.form.get("status", ""),
+        }
+        errors = validate_student(form["name"], form["course"], form["status"])
+
+        if not errors:
             conn = get_db()
             try:
                 with conn:
                     conn.execute(
                         "INSERT INTO students (name, course, status) VALUES (?, ?, ?)",
-                        (name, course, status),
+                        (form["name"], form["course"], form["status"]),
                     )
             finally:
                 conn.close()
             return redirect(url_for("student_list"))
 
-    return render_template("add_student.html", student=None)
+    return render_template("add_student.html", student=None, form=form, errors=errors)
 
 
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
@@ -127,22 +160,32 @@ def edit_student(student_id):
         if student is None:
             abort(404)
 
-        if request.method == "POST":
-            name = request.form["name"].strip()
-            course = request.form["course"].strip()
-            status = request.form["status"]
+        errors = {}
+        form = {
+            "name": student["name"],
+            "course": student["course"],
+            "status": student["status"],
+        }
 
-            if name and course:
+        if request.method == "POST":
+            form = {
+                "name": request.form.get("name", "").strip(),
+                "course": request.form.get("course", "").strip(),
+                "status": request.form.get("status", ""),
+            }
+            errors = validate_student(form["name"], form["course"], form["status"])
+
+            if not errors:
                 with conn:
                     conn.execute(
                         "UPDATE students SET name = ?, course = ?, status = ? WHERE id = ?",
-                        (name, course, status, student_id),
+                        (form["name"], form["course"], form["status"], student_id),
                     )
                 return redirect(url_for("student_list"))
     finally:
         conn.close()
 
-    return render_template("add_student.html", student=student)
+    return render_template("add_student.html", student=student, form=form, errors=errors)
 
 
 @app.route("/students/<int:student_id>/delete", methods=["POST"])

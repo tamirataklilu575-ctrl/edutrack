@@ -245,3 +245,14 @@ th {
     .sidebar { width: 100%; }
     .content { padding: 20px; }
 }
+/* Validation errors */
+.error-text {
+    color: var(--red);
+    font-size: 0.85rem;
+}
+
+.form-group.has-error input,
+.form-group.has-error select {
+    border-color: var(--red);
+    background: #fef2f2;
+}
