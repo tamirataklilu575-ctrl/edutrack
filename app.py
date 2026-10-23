@@ -1,5 +1,6 @@
-"""EduTrack - Student Management System (Phase 4B: Flash messages and 404)."""
+"""EduTrack - Student Management System (Phase 5C: Deployment ready)."""
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -14,8 +15,9 @@ from flask import (
 )
 
 app = Flask(__name__)
-# Required for flash messages. Replace with a secret environment variable in production.
-app.secret_key = "dev-only-change-me"
+# Read the secret key from the environment in production.
+# The fallback value is for local development only.
+app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 DATABASE = Path(__file__).parent / "edutrack.db"
 
@@ -225,4 +227,5 @@ def delete_student(student_id):
 init_db()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Debug mode is only enabled when FLASK_DEBUG=1 is set (local development).
+    app.run(debug=os.environ.get("FLASK_DEBUG") == "1")
