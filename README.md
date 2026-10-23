@@ -47,7 +47,7 @@ edutrack/
 ### Installation
 
 ```bash
-git clone https://github.com/<your-username>/edutrack.git
+git clone https://github.com/tamirataklilu575-ctrl/edutrack.git
 cd edutrack
 python -m venv venv
 ```
