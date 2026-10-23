@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Student' if student else 'Add Student' }}{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>{{ 'Edit Student' if student else 'Add Student' }}</h2>
+    <p>{{ 'Update the student details.' if student else 'Register a new student.' }}</p>
+</header>
+
+<section class="panel form-panel">
+    <form method="POST">
+        <div class="form-group">
+            <label for="name">Full Name</label>
+            <input type="text" id="name" name="name"
+                   value="{{ student.name if student else '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="course">Course</label>
+            <input type="text" id="course" name="course"
+                   value="{{ student.course if student else '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="status">Status</label>
+            <select id="status" name="status">
+                <option value="Active" {{ 'selected' if student and student.status == 'Active' }}>Active</option>
+                <option value="Inactive" {{ 'selected' if student and student.status == 'Inactive' }}>Inactive</option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn">Save Student</button>
+        <a href="{{ url_for('student_list') }}" class="btn btn-secondary">Cancel</a>
+    </form>
+</section>
+{% endblock %}

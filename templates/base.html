@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}EduTrack{% endblock %} | EduTrack</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <aside class="sidebar">
+        <h1 class="logo">🎓 EduTrack</h1>
+        <nav>
+            <a href="{{ url_for('dashboard') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
+            <a href="{{ url_for('student_list') }}"
+               class="nav-link {{ 'active' if request.endpoint in ['student_list', 'add_student', 'edit_student'] }}">Students</a>
+        </nav>
+    </aside>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

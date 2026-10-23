@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Dashboard</h2>
+    <p>Overview of your student records.</p>
+</header>
+
+<section class="stats-grid">
+    <div class="card">
+        <span class="card-label">Total Students</span>
+        <span class="card-value">{{ stats.total }}</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Active</span>
+        <span class="card-value text-green">{{ stats.active }}</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Inactive</span>
+        <span class="card-value text-red">{{ stats.inactive }}</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Courses</span>
+        <span class="card-value">{{ stats.courses }}</span>
+    </div>
+</section>
+
+<section class="panel">
+    <h3>Recent Students</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Course</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for student in recent_students %}
+            <tr>
+                <td>{{ student.id }}</td>
+                <td>{{ student.name }}</td>
+                <td>{{ student.course }}</td>
+                <td>
+                    <span class="badge {{ 'badge-active' if student.status == 'Active' else 'badge-inactive' }}">
+                        {{ student.status }}
+                    </span>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4">No students found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

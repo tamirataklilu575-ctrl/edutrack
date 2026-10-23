@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Students{% endblock %}
+
+{% block content %}
+<header class="page-header page-header-row">
+    <div>
+        <h2>Students</h2>
+        <p>All registered students.</p>
+    </div>
+    <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
+</header>
+
+<form method="GET" action="{{ url_for('student_list') }}" class="search-form">
+    <input type="text" name="q" value="{{ query }}"
+           placeholder="Search by name or course...">
+    <button type="submit" class="btn">Search</button>
+    {% if query %}
+    <a href="{{ url_for('student_list') }}" class="btn btn-secondary">Clear</a>
+    {% endif %}
+</form>
+
+<section class="panel">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Course</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for student in students %}
+            <tr>
+                <td>{{ student.id }}</td>
+                <td>{{ student.name }}</td>
+                <td>{{ student.course }}</td>
+                <td>
+                    <span class="badge {{ 'badge-active' if student.status == 'Active' else 'badge-inactive' }}">
+                        {{ student.status }}
+                    </span>
+                </td>
+                <td class="actions">
+                    <a href="{{ url_for('edit_student', student_id=student.id) }}" class="btn btn-small">Edit</a>
+                    <form method="POST"
+                          action="{{ url_for('delete_student', student_id=student.id) }}"
+                          onsubmit="return confirm('Delete this student?');">
+                        <button type="submit" class="btn btn-small btn-danger">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">No students found.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
