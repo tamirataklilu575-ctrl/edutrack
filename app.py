@@ -1,11 +1,21 @@
-"""EduTrack - Student Management System (Phase 4A: Validation)."""
+"""EduTrack - Student Management System (Phase 4B: Flash messages and 404)."""
 
 import sqlite3
 from pathlib import Path
 
-from flask import Flask, abort, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 
 app = Flask(__name__)
+# Required for flash messages. Replace with a secret environment variable in production.
+app.secret_key = "dev-only-change-me"
 
 DATABASE = Path(__file__).parent / "edutrack.db"
 
@@ -71,6 +81,12 @@ def validate_student(name, course, status):
         errors["status"] = "Please choose a valid status."
 
     return errors
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    """Render a friendly page when a URL or student does not exist."""
+    return render_template("404.html"), 404
 
 
 @app.route("/")
@@ -144,6 +160,7 @@ def add_student():
                     )
             finally:
                 conn.close()
+            flash("Student added successfully!", "success")
             return redirect(url_for("student_list"))
 
     return render_template("add_student.html", student=None, form=form, errors=errors)
@@ -181,6 +198,7 @@ def edit_student(student_id):
                         "UPDATE students SET name = ?, course = ?, status = ? WHERE id = ?",
                         (form["name"], form["course"], form["status"], student_id),
                     )
+                flash("Student updated successfully!", "success")
                 return redirect(url_for("student_list"))
     finally:
         conn.close()
@@ -200,6 +218,7 @@ def delete_student(student_id):
     finally:
         conn.close()
 
+    flash("Student deleted.", "success")
     return redirect(url_for("student_list"))
 
 
