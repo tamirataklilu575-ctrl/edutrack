@@ -1,6 +1,10 @@
 # 🎓 EduTrack
 
 > Simple student records, managed well.
+**🔗 Live Demo:** https://edutrack-xxxx.onrender.com
+
+> Note: The demo runs on a free hosting plan. The first load may take
+> about a minute, and sample data may reset when the server restarts.
 
 EduTrack is a student management web application built with **Flask** and
 **SQLite**. It was created as a learning and portfolio project to practice
