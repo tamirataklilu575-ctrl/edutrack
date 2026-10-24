@@ -44,6 +44,7 @@ SUBJECTS = (
 )
 TERMS = ("Semester 1", "Semester 2")
 ROLES = ("admin", "teacher")
+PASS_MARK = 50
 
 MIN_LENGTH = 2
 MAX_LENGTH = 100
@@ -283,6 +284,19 @@ def validate_registration(username, password, confirm):
         errors["confirm"] = "Passwords do not match."
 
     return errors
+
+
+def average_remark(average):
+    """Turn an average score into a short written remark."""
+    if average >= 90:
+        return "Excellent"
+    if average >= 75:
+        return "Very Good"
+    if average >= 60:
+        return "Good"
+    if average >= PASS_MARK:
+        return "Satisfactory"
+    return "Needs Improvement"
 
 
 @app.errorhandler(404)
@@ -603,6 +617,103 @@ def delete_student(student_id):
 
     flash("Student deleted.", "success")
     return redirect(url_for("student_list"))
+
+
+@app.route("/students/<int:student_id>/report")
+@login_required
+def report_card(student_id):
+    """Show one student's report card: marks, average, rank, and attendance."""
+    term = request.args.get("term", TERMS[0])
+    if term not in TERMS:
+        term = TERMS[0]
+
+    conn = get_db()
+    try:
+        student = conn.execute(
+            "SELECT * FROM students WHERE id = ?", (student_id,)
+        ).fetchone()
+        if student is None:
+            abort(404)
+
+        mark_rows = conn.execute(
+            "SELECT subject, score FROM marks WHERE student_id = ? AND term = ?",
+            (student_id, term),
+        ).fetchall()
+
+        attendance_rows = conn.execute(
+            "SELECT status, COUNT(*) AS total FROM attendance "
+            "WHERE student_id = ? GROUP BY status",
+            (student_id,),
+        ).fetchall()
+
+        # Average per classmate (same grade and section) for ranking.
+        class_rows = conn.execute(
+            "SELECT m.student_id AS student_id, AVG(m.score) AS average "
+            "FROM marks m JOIN students s ON s.id = m.student_id "
+            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
+            "AND m.term = ? GROUP BY m.student_id",
+            (student["grade"], student["section"], term),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    scores = {row["subject"]: row["score"] for row in mark_rows}
+
+    subject_rows = []
+    for subject in SUBJECTS:
+        score = scores.get(subject)
+        if score is None:
+            subject_rows.append({"subject": subject, "score": "—", "result": "—"})
+        else:
+            result = "Pass" if score >= PASS_MARK else "Fail"
+            subject_rows.append(
+                {"subject": subject, "score": f"{score:g}", "result": result}
+            )
+
+    average = None
+    average_text = "—"
+    remark = ""
+    rank_text = "—"
+
+    if scores:
+        average = sum(scores.values()) / len(scores)
+        average_text = f"{average:.1f}"
+        remark = average_remark(average)
+
+        classmates = {row["student_id"] for row in class_rows} | {student_id}
+        higher = sum(
+            1
+            for row in class_rows
+            if row["student_id"] != student_id and row["average"] > average
+        )
+        rank_text = f"{higher + 1} of {len(classmates)}"
+
+    attendance_counts = {status: 0 for status in ATTENDANCE_STATUSES}
+    for row in attendance_rows:
+        if row["status"] in attendance_counts:
+            attendance_counts[row["status"]] = row["total"]
+
+    days_recorded = sum(attendance_counts.values())
+    if days_recorded:
+        # A late student still attended, so Late counts as attended.
+        attended = attendance_counts["Present"] + attendance_counts["Late"]
+        attendance_rate = f"{round(attended * 100 / days_recorded)}%"
+    else:
+        attendance_rate = "—"
+
+    return render_template(
+        "report_card.html",
+        student=student,
+        term=term,
+        subject_rows=subject_rows,
+        has_marks=bool(scores),
+        average_text=average_text,
+        remark=remark,
+        rank_text=rank_text,
+        attendance_counts=attendance_counts,
+        days_recorded=days_recorded,
+        attendance_rate=attendance_rate,
+    )
 
 
 # ----------------------------------------------------------- Attendance route

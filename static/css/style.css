@@ -485,3 +485,93 @@ th {
     color: var(--muted);
     font-size: 0.85rem;
 }
+/* Report card */
+.btn-outline {
+    background: transparent;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.header-actions .btn-secondary {
+    margin-left: 0;
+}
+
+.report-head {
+    text-align: center;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid var(--primary);
+}
+
+.report-head p {
+    color: var(--muted);
+}
+
+.report-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.report-info div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.info-label {
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+
+.report-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.report-summary .card {
+    border: 1px solid var(--border);
+    box-shadow: none;
+}
+
+.card-note {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.no-marks {
+    padding: 24px 0;
+    color: var(--muted);
+    text-align: center;
+}
+
+/* Printing: hide the menu and controls, keep only the report */
+@media print {
+    .sidebar,
+    .no-print,
+    .flash {
+        display: none !important;
+    }
+
+    body {
+        display: block;
+        background: #fff;
+    }
+
+    .content {
+        padding: 0;
+    }
+
+    .panel {
+        box-shadow: none;
+    }
+}

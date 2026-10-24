@@ -433,3 +433,75 @@ def test_teacher_cannot_change_roles(teacher_client):
         "/users/1/role", data={"role": "teacher"}, follow_redirects=True
     )
     assert b"do not have permission" in response.data
+
+    
+
+# --------------------------------------------------------------- Report card
+
+
+def test_report_card_requires_login(client):
+    response = client.get("/students/1/report")
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_report_card_unknown_student_returns_404(auth_client):
+    response = auth_client.get("/students/999/report")
+    assert response.status_code == 404
+
+
+def test_report_card_shows_marks_average_and_rank(auth_client):
+    auth_client.post("/marks", data=marks_data(score_1="85"))
+    response = auth_client.get("/students/1/report?term=Semester+1")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"85" in response.data
+    assert b"Pass" in response.data
+    assert b"1 of 1" in response.data
+
+
+def test_report_card_marks_failing_subject(auth_client):
+    auth_client.post("/marks", data=marks_data(score_1="30"))
+    response = auth_client.get("/students/1/report?term=Semester+1")
+    assert b"Fail" in response.data
+    assert b"Needs Improvement" in response.data
+
+
+def test_report_card_without_marks(auth_client):
+    response = auth_client.get("/students/1/report")
+    assert response.status_code == 200
+    assert b"No marks recorded" in response.data
+
+
+def test_report_card_attendance_rate(auth_client):
+    auth_client.post(
+        "/attendance",
+        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Present"},
+    )
+    response = auth_client.get("/students/1/report")
+    assert b"100%" in response.data
+
+
+def test_report_card_all_absent_gives_zero_rate(auth_client):
+    auth_client.post(
+        "/attendance",
+        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Absent"},
+    )
+    response = auth_client.get("/students/1/report")
+    assert b"0%" in response.data
+    assert b"100%" not in response.data
+
+
+def test_report_card_invalid_term_falls_back(auth_client):
+    response = auth_client.get("/students/1/report?term=bogus")
+    assert response.status_code == 200
+
+
+def test_teacher_can_view_report_card(teacher_client):
+    response = teacher_client.get("/students/1/report")
+    assert response.status_code == 200
+
+
+def test_students_list_has_report_link(auth_client):
+    response = auth_client.get("/students")
+    assert b"/students/1/report" in response.data

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Report Card{% endblock %}
+
+{% block content %}
+<header class="page-header page-header-row no-print">
+    <div>
+        <h2>Report Card</h2>
+        <p>{{ student.name }}</p>
+    </div>
+    <div class="header-actions">
+        <button type="button" class="btn" onclick="window.print()">Print</button>
+        <a href="{{ url_for('student_list') }}" class="btn btn-secondary">Back</a>
+    </div>
+</header>
+
+<form method="GET" action="{{ url_for('report_card', student_id=student.id) }}"
+      class="search-form no-print">
+    <select name="term">
+        {% for t in TERMS %}
+        <option value="{{ t }}" {{ 'selected' if term == t }}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn">Show</button>
+</form>
+
+<section class="panel report">
+    <div class="report-head">
+        <h3>EduTrack High School</h3>
+        <p>Student Report Card &middot; {{ term }}</p>
+    </div>
+
+    <div class="report-info">
+        <div><span class="info-label">Name</span><span>{{ student.name }}</span></div>
+        <div><span class="info-label">Grade</span><span>{{ student.grade }}</span></div>
+        <div><span class="info-label">Section</span><span>{{ student.section }}</span></div>
+        <div><span class="info-label">Gender</span><span>{{ student.gender }}</span></div>
+    </div>
+
+    {% if has_marks %}
+    <table>
+        <thead>
+            <tr>
+                <th>Subject</th>
+                <th>Score</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in subject_rows %}
+            <tr>
+                <td>{{ row.subject }}</td>
+                <td>{{ row.score }}</td>
+                <td>
+                    {% if row.result == 'Pass' %}
+                    <span class="badge badge-active">Pass</span>
+                    {% elif row.result == 'Fail' %}
+                    <span class="badge badge-inactive">Fail</span>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="no-marks">No marks recorded for {{ term }} yet.</p>
+    {% endif %}
+
+    <div class="report-summary">
+        <div class="card">
+            <span class="card-label">Average</span>
+            <span class="card-value">{{ average_text }}</span>
+            {% if remark %}<span class="card-note">{{ remark }}</span>{% endif %}
+        </div>
+        <div class="card">
+            <span class="card-label">Class Rank</span>
+            <span class="card-value">{{ rank_text }}</span>
+        </div>
+        <div class="card">
+            <span class="card-label">Attendance</span>
+            <span class="card-value">{{ attendance_rate }}</span>
+            <span class="card-note">
+                {{ attendance_counts.Present }} present &middot;
+                {{ attendance_counts.Absent }} absent &middot;
+                {{ attendance_counts.Late }} late
+            </span>
+        </div>
+    </div>
+</section>
+{% endblock %}
