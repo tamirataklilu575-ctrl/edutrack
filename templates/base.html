@@ -17,6 +17,8 @@
                class="nav-link {{ 'active' if request.endpoint in ['student_list', 'add_student', 'edit_student'] }}">Students</a>
             <a href="{{ url_for('attendance') }}"
                class="nav-link {{ 'active' if request.endpoint == 'attendance' }}">Attendance</a>
+            <a href="{{ url_for('marks') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'marks' }}">Marks</a>
         </nav>
 
         <div class="sidebar-user">

@@ -256,3 +256,68 @@ def test_delete_student_with_attendance(auth_client):
     )
     response = auth_client.post("/students/1/delete", follow_redirects=True)
     assert b"Student deleted." in response.data
+
+    
+
+# --------------------------------------------------------------------- Marks
+
+
+MARKS_QUERY = "grade=9&section=A&subject=Mathematics&term=Semester+1"
+
+
+def marks_data(**overrides):
+    """Return valid marks form data for Grade 9 Section A (student 1)."""
+    data = {
+        "grade": "9",
+        "section": "A",
+        "subject": "Mathematics",
+        "term": "Semester 1",
+        "score_1": "85",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_marks_requires_login(client):
+    response = client.get("/marks")
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_marks_page_lists_class_students(auth_client):
+    response = auth_client.get(f"/marks?{MARKS_QUERY}")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"Meron Bekele" not in response.data
+
+
+def test_marks_save_and_summary(auth_client):
+    response = auth_client.post("/marks", data=marks_data(), follow_redirects=True)
+    assert b"Marks saved." in response.data
+    assert b"Average: 85.0" in response.data
+
+
+def test_marks_update_overwrites_previous_score(auth_client):
+    auth_client.post("/marks", data=marks_data(score_1="70"))
+    response = auth_client.post(
+        "/marks", data=marks_data(score_1="90"), follow_redirects=True
+    )
+    assert b"Average: 90.0" in response.data
+    assert b"Marked: 1" in response.data
+
+
+def test_marks_rejects_score_above_100(auth_client):
+    response = auth_client.post("/marks", data=marks_data(score_1="150"))
+    assert response.status_code == 200
+    assert b"Score must be between 0 and 100." in response.data
+
+
+def test_marks_rejects_non_numeric_score(auth_client):
+    response = auth_client.post("/marks", data=marks_data(score_1="abc"))
+    assert b"Enter a number." in response.data
+
+
+def test_delete_student_with_marks(auth_client):
+    auth_client.post("/marks", data=marks_data())
+    response = auth_client.post("/students/1/delete", follow_redirects=True)
+    assert b"Student deleted." in response.data

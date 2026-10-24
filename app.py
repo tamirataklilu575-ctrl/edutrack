@@ -32,6 +32,16 @@ SECTIONS = ("A", "B", "C", "D")
 GENDERS = ("Male", "Female")
 VALID_STATUSES = ("Active", "Inactive")
 ATTENDANCE_STATUSES = ("Present", "Absent", "Late")
+SUBJECTS = (
+    "Amharic",
+    "English",
+    "Mathematics",
+    "Physics",
+    "Chemistry",
+    "Biology",
+    "Civics",
+)
+TERMS = ("Semester 1", "Semester 2")
 
 MIN_LENGTH = 2
 MAX_LENGTH = 100
@@ -101,6 +111,19 @@ def init_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS marks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                subject TEXT NOT NULL,
+                term TEXT NOT NULL,
+                score REAL NOT NULL,
+                UNIQUE (student_id, subject, term),
+                FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+            )
+            """
+        )
         count = conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
         if count == 0:
             conn.executemany(
@@ -120,6 +143,8 @@ def inject_options():
         "GENDERS": GENDERS,
         "STATUSES": VALID_STATUSES,
         "ATTENDANCE_STATUSES": ATTENDANCE_STATUSES,
+        "SUBJECTS": SUBJECTS,
+        "TERMS": TERMS,
     }
 
 
@@ -457,7 +482,7 @@ def edit_student(student_id):
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
 @login_required
 def delete_student(student_id):
-    """Delete the student (and their attendance records) with the given ID."""
+    """Delete the student (and their attendance and marks) with the given ID."""
     conn = get_db()
     try:
         with conn:
@@ -540,6 +565,120 @@ def attendance():
         grade=grade,
         section=section,
         date_iso=date_iso,
+    )
+
+
+# ----------------------------------------------------------------- Marks route
+
+
+@app.route("/marks", methods=["GET", "POST"])
+@login_required
+def marks():
+    """Show and save marks for one class, subject, and term."""
+    grade = request.values.get("grade", "9")
+    if grade not in [str(g) for g in GRADES]:
+        grade = "9"
+
+    section = request.values.get("section", "A")
+    if section not in SECTIONS:
+        section = "A"
+
+    subject = request.values.get("subject", SUBJECTS[0])
+    if subject not in SUBJECTS:
+        subject = SUBJECTS[0]
+
+    term = request.values.get("term", TERMS[0])
+    if term not in TERMS:
+        term = TERMS[0]
+
+    errors = {}
+    entered = {}
+
+    conn = get_db()
+    try:
+        class_students = conn.execute(
+            "SELECT * FROM students "
+            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
+            (int(grade), section),
+        ).fetchall()
+
+        if request.method == "POST":
+            records = []
+            for student in class_students:
+                raw = request.form.get(f"score_{student['id']}", "").strip()
+                entered[student["id"]] = raw
+                if raw == "":
+                    continue  # Blank means "no mark yet".
+
+                try:
+                    score = float(raw)
+                except ValueError:
+                    errors[student["id"]] = "Enter a number."
+                    continue
+
+                # NaN fails this comparison too, so it is rejected as well.
+                if not 0 <= score <= 100:
+                    errors[student["id"]] = "Score must be between 0 and 100."
+                    continue
+
+                records.append((student["id"], subject, term, score))
+
+            if not errors:
+                with conn:
+                    conn.executemany(
+                        "INSERT INTO marks (student_id, subject, term, score) "
+                        "VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT (student_id, subject, term) "
+                        "DO UPDATE SET score = excluded.score",
+                        records,
+                    )
+                flash("Marks saved.", "success")
+                return redirect(
+                    url_for(
+                        "marks",
+                        grade=grade,
+                        section=section,
+                        subject=subject,
+                        term=term,
+                    )
+                )
+            flash("Please fix the highlighted scores.", "error")
+
+        rows = conn.execute(
+            "SELECT student_id, score FROM marks WHERE subject = ? AND term = ?",
+            (subject, term),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    saved = {row["student_id"]: row["score"] for row in rows}
+    class_scores = [
+        saved[s["id"]] for s in class_students if s["id"] in saved
+    ]
+
+    if class_scores:
+        summary = {
+            "count": len(class_scores),
+            "average": f"{sum(class_scores) / len(class_scores):.1f}",
+            "highest": f"{max(class_scores):g}",
+            "lowest": f"{min(class_scores):g}",
+        }
+    else:
+        summary = {"count": 0, "average": "—", "highest": "—", "lowest": "—"}
+
+    scores = {student_id: f"{value:g}" for student_id, value in saved.items()}
+
+    return render_template(
+        "marks.html",
+        students=class_students,
+        scores=scores,
+        entered=entered,
+        errors=errors,
+        summary=summary,
+        grade=grade,
+        section=section,
+        subject=subject,
+        term=term,
     )
 
 

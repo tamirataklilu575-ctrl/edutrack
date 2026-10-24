@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Marks{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Marks</h2>
+    <p>Record student scores by class, subject, and term.</p>
+</header>
+
+<form method="GET" action="{{ url_for('marks') }}" class="search-form filter-wrap">
+    <select name="grade">
+        {% for g in GRADES %}
+        <option value="{{ g }}" {{ 'selected' if grade == g|string }}>Grade {{ g }}</option>
+        {% endfor %}
+    </select>
+    <select name="section">
+        {% for s in SECTIONS %}
+        <option value="{{ s }}" {{ 'selected' if section == s }}>Section {{ s }}</option>
+        {% endfor %}
+    </select>
+    <select name="subject">
+        {% for s in SUBJECTS %}
+        <option value="{{ s }}" {{ 'selected' if subject == s }}>{{ s }}</option>
+        {% endfor %}
+    </select>
+    <select name="term">
+        {% for t in TERMS %}
+        <option value="{{ t }}" {{ 'selected' if term == t }}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn">Load</button>
+</form>
+
+<section class="att-summary">
+    <span class="att-pill pill-neutral">Marked: {{ summary.count }}</span>
+    <span class="att-pill att-present">Average: {{ summary.average }}</span>
+    <span class="att-pill att-present">Highest: {{ summary.highest }}</span>
+    <span class="att-pill att-absent">Lowest: {{ summary.lowest }}</span>
+</section>
+
+<section class="panel">
+    {% if students %}
+    <form method="POST" action="{{ url_for('marks') }}">
+        <input type="hidden" name="grade" value="{{ grade }}">
+        <input type="hidden" name="section" value="{{ section }}">
+        <input type="hidden" name="subject" value="{{ subject }}">
+        <input type="hidden" name="term" value="{{ term }}">
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Score (0-100)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for student in students %}
+                {% set shown = entered.get(student.id, scores.get(student.id, '')) %}
+                <tr>
+                    <td>{{ student.name }}</td>
+                    <td>
+                        <div class="score-cell {{ 'has-error' if errors.get(student.id) }}">
+                            <input type="number" name="score_{{ student.id }}"
+                                   value="{{ shown }}" min="0" max="100" step="any"
+                                   class="score-input">
+                            {% if errors.get(student.id) %}
+                            <span class="error-text">{{ errors.get(student.id) }}</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <button type="submit" class="btn save-btn">Save Marks</button>
+    </form>
+    {% else %}
+    <p>No active students in Grade {{ grade }} Section {{ section }}.</p>
+    {% endif %}
+</section>
+{% endblock %}

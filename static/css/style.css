@@ -433,3 +433,31 @@ th {
 .save-btn {
     margin-top: 20px;
 }
+/* Marks */
+.filter-wrap {
+    flex-wrap: wrap;
+}
+
+.pill-neutral {
+    background: #e0e7ff;
+    color: var(--primary);
+}
+
+.score-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.score-input {
+    width: 120px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+}
+
+.score-cell.has-error .score-input {
+    border-color: var(--red);
+    background: #fef2f2;
+}
