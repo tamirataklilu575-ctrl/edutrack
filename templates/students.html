@@ -3,12 +3,16 @@
 {% block title %}Students{% endblock %}
 
 {% block content %}
+{% set is_admin = current_user.role == 'admin' %}
+
 <header class="page-header page-header-row">
     <div>
         <h2>Students</h2>
         <p>All registered high school students.</p>
     </div>
+    {% if is_admin %}
     <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
+    {% endif %}
 </header>
 
 <form method="GET" action="{{ url_for('student_list') }}" class="search-form">
@@ -36,7 +40,7 @@
                 <th>Gender</th>
                 <th>Parent Phone</th>
                 <th>Status</th>
-                <th>Actions</th>
+                {% if is_admin %}<th>Actions</th>{% endif %}
             </tr>
         </thead>
         <tbody>
@@ -53,6 +57,7 @@
                         {{ student.status }}
                     </span>
                 </td>
+                {% if is_admin %}
                 <td class="actions">
                     <a href="{{ url_for('edit_student', student_id=student.id) }}" class="btn btn-small">Edit</a>
                     <form method="POST"
@@ -61,6 +66,7 @@
                         <button type="submit" class="btn btn-small btn-danger">Delete</button>
                     </form>
                 </td>
+                {% endif %}
             </tr>
             {% else %}
             <tr><td colspan="8">No students found.</td></tr>

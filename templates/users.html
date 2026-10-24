@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Users{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Users</h2>
+    <p>Admins manage students and users. Teachers take attendance and enter marks.</p>
+</header>
+
+<section class="panel">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>
+                    {{ user.username }}
+                    {% if user.id == current_user.id %}<span class="you-tag">(you)</span>{% endif %}
+                </td>
+                <td>
+                    <span class="badge {{ 'badge-admin' if user.role == 'admin' else 'badge-teacher' }}">
+                        {{ user.role|capitalize }}
+                    </span>
+                </td>
+                <td>
+                    {% if user.id != current_user.id %}
+                    <form method="POST" action="{{ url_for('change_role', user_id=user.id) }}">
+                        {% if user.role == 'admin' %}
+                        <input type="hidden" name="role" value="teacher">
+                        <button type="submit" class="btn btn-small">Make Teacher</button>
+                        {% else %}
+                        <input type="hidden" name="role" value="admin">
+                        <button type="submit" class="btn btn-small">Make Admin</button>
+                        {% endif %}
+                    </form>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

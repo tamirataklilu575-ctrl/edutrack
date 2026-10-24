@@ -11,6 +11,7 @@ from flask import (
     Flask,
     abort,
     flash,
+    g,
     redirect,
     render_template,
     request,
@@ -42,6 +43,7 @@ SUBJECTS = (
     "Civics",
 )
 TERMS = ("Semester 1", "Semester 2")
+ROLES = ("admin", "teacher")
 
 MIN_LENGTH = 2
 MAX_LENGTH = 100
@@ -70,7 +72,7 @@ def get_db():
 
 
 def init_db():
-    """Create tables and add sample students on first run."""
+    """Create tables, migrate older databases, and add sample students."""
     with get_db() as conn:
         # Development-stage migration: replace the old university-style table.
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(students)")]
@@ -95,10 +97,24 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'teacher'
             )
             """
         )
+
+        # Migration: databases created before roles existed get a role column.
+        # The oldest account becomes the admin; everyone else is a teacher.
+        user_columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
+        if "role" not in user_columns:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'teacher'"
+            )
+            conn.execute(
+                "UPDATE users SET role = 'admin' "
+                "WHERE id = (SELECT MIN(id) FROM users)"
+            )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS attendance (
@@ -134,10 +150,35 @@ def init_db():
             )
 
 
+@app.before_request
+def load_current_user():
+    """Load the signed-in user (with their current role) for this request."""
+    g.user = None
+    if request.endpoint == "static":
+        return
+
+    user_id = session.get("user_id")
+    if user_id is None:
+        return
+
+    conn = get_db()
+    try:
+        g.user = conn.execute(
+            "SELECT id, username, role FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if g.user is None:
+        # The account no longer exists, so end the session.
+        session.clear()
+
+
 @app.context_processor
 def inject_options():
-    """Make the allowed field values available in every template."""
+    """Make allowed field values and the current user available in templates."""
     return {
+        "current_user": getattr(g, "user", None),
         "GRADES": GRADES,
         "SECTIONS": SECTIONS,
         "GENDERS": GENDERS,
@@ -153,9 +194,25 @@ def login_required(view):
 
     @wraps(view)
     def wrapped_view(*args, **kwargs):
-        if "user_id" not in session:
+        if g.user is None:
             flash("Please log in to continue.", "error")
             return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
+def admin_required(view):
+    """Allow only signed-in admins; send everyone else away with a message."""
+
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.user is None:
+            flash("Please log in to continue.", "error")
+            return redirect(url_for("login"))
+        if g.user["role"] != "admin":
+            flash("You do not have permission to do that.", "error")
+            return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
 
     return wrapped_view
@@ -240,7 +297,7 @@ def page_not_found(error):
 @app.route("/register", methods=["GET", "POST"])
 def register():
     """Show the registration form (GET) and create a new user (POST)."""
-    if "user_id" in session:
+    if g.user is not None:
         return redirect(url_for("dashboard"))
 
     errors = {}
@@ -256,9 +313,15 @@ def register():
             conn = get_db()
             try:
                 with conn:
+                    # The very first account becomes the admin.
+                    user_count = conn.execute(
+                        "SELECT COUNT(*) FROM users"
+                    ).fetchone()[0]
+                    role = "admin" if user_count == 0 else "teacher"
                     conn.execute(
-                        "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                        (form["username"], generate_password_hash(password)),
+                        "INSERT INTO users (username, password_hash, role) "
+                        "VALUES (?, ?, ?)",
+                        (form["username"], generate_password_hash(password), role),
                     )
             except sqlite3.IntegrityError:
                 errors["username"] = "This username is already taken."
@@ -275,7 +338,7 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     """Show the login form (GET) and sign the user in (POST)."""
-    if "user_id" in session:
+    if g.user is not None:
         return redirect(url_for("dashboard"))
 
     form = {"username": ""}
@@ -295,7 +358,6 @@ def login():
         if user is not None and check_password_hash(user["password_hash"], password):
             session.clear()
             session["user_id"] = user["id"]
-            session["username"] = user["username"]
             flash(f"Welcome back, {user['username']}!", "success")
             return redirect(url_for("dashboard"))
 
@@ -311,6 +373,53 @@ def logout():
     session.clear()
     flash("You have been logged out.", "success")
     return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------- User routes
+
+
+@app.route("/users")
+@admin_required
+def user_list():
+    """List all accounts so an admin can manage their roles."""
+    conn = get_db()
+    try:
+        users = conn.execute(
+            "SELECT id, username, role FROM users ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    return render_template("users.html", users=users)
+
+
+@app.route("/users/<int:user_id>/role", methods=["POST"])
+@admin_required
+def change_role(user_id):
+    """Change a user's role (admins cannot change their own)."""
+    new_role = request.form.get("role", "")
+
+    if new_role not in ROLES:
+        flash("Invalid role.", "error")
+        return redirect(url_for("user_list"))
+
+    if user_id == g.user["id"]:
+        flash("You cannot change your own role.", "error")
+        return redirect(url_for("user_list"))
+
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?", (new_role, user_id)
+            )
+        if cursor.rowcount == 0:
+            abort(404)
+    finally:
+        conn.close()
+
+    flash("Role updated.", "success")
+    return redirect(url_for("user_list"))
 
 
 # ------------------------------------------------------------- Student routes
@@ -388,7 +497,7 @@ def student_list():
 
 
 @app.route("/students/add", methods=["GET", "POST"])
-@login_required
+@admin_required
 def add_student():
     """Show the add-student form (GET) and save a new student (POST)."""
     errors = {}
@@ -431,7 +540,7 @@ def add_student():
 
 
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
-@login_required
+@admin_required
 def edit_student(student_id):
     """Show the edit form (GET) and update the student (POST)."""
     conn = get_db()
@@ -480,7 +589,7 @@ def edit_student(student_id):
 
 
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
-@login_required
+@admin_required
 def delete_student(student_id):
     """Delete the student (and their attendance and marks) with the given ID."""
     conn = get_db()

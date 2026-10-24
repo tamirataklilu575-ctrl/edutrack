@@ -461,3 +461,27 @@ th {
     border-color: var(--red);
     background: #fef2f2;
 }
+/* Roles */
+.badge-admin {
+    background: #e0e7ff;
+    color: var(--primary);
+}
+
+.badge-teacher {
+    background: #f3f4f6;
+    color: var(--muted);
+}
+
+.role-tag {
+    margin-left: 6px;
+    padding: 2px 8px;
+    background: #374151;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+}
+
+.you-tag {
+    color: var(--muted);
+    font-size: 0.85rem;
+}

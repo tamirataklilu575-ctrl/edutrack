@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-    {% if session.get('user_id') %}
+    {% if current_user %}
     <aside class="sidebar">
         <h1 class="logo">🎓 EduTrack</h1>
         <nav>
@@ -19,10 +19,17 @@
                class="nav-link {{ 'active' if request.endpoint == 'attendance' }}">Attendance</a>
             <a href="{{ url_for('marks') }}"
                class="nav-link {{ 'active' if request.endpoint == 'marks' }}">Marks</a>
+            {% if current_user.role == 'admin' %}
+            <a href="{{ url_for('user_list') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'user_list' }}">Users</a>
+            {% endif %}
         </nav>
 
         <div class="sidebar-user">
-            <span class="user-name">👤 {{ session.get('username') }}</span>
+            <span class="user-name">
+                👤 {{ current_user.username }}
+                <small class="role-tag">{{ current_user.role }}</small>
+            </span>
             <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
                 <button type="submit" class="nav-link">Log out</button>
             </form>

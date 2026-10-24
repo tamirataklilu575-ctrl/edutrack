@@ -321,3 +321,115 @@ def test_delete_student_with_marks(auth_client):
     auth_client.post("/marks", data=marks_data())
     response = auth_client.post("/students/1/delete", follow_redirects=True)
     assert b"Student deleted." in response.data
+
+    
+
+# --------------------------------------------------------------------- Roles
+
+
+def register(client, username, password="secret123"):
+    """Register an account through the form."""
+    return client.post(
+        "/register",
+        data={"username": username, "password": password, "confirm": password},
+    )
+
+
+def login(client, username, password="secret123"):
+    """Log in through the form."""
+    return client.post("/login", data={"username": username, "password": password})
+
+
+@pytest.fixture
+def teacher_client(client):
+    """A client logged in as a teacher (the first account, 'boss', is the admin)."""
+    register(client, "boss")
+    register(client, "teacher1")
+    login(client, "teacher1")
+    return client
+
+
+def test_first_user_is_admin(auth_client):
+    response = auth_client.get("/users")
+    assert response.status_code == 200
+    assert b"Admin" in response.data
+
+
+def test_teacher_cannot_open_users_page(teacher_client):
+    response = teacher_client.get("/users", follow_redirects=True)
+    assert b"do not have permission" in response.data
+
+
+def test_teacher_cannot_add_student(teacher_client):
+    response = teacher_client.post(
+        "/students/add", data=student_data(), follow_redirects=True
+    )
+    assert b"do not have permission" in response.data
+    assert b"Test Student" not in teacher_client.get("/students").data
+
+
+def test_teacher_cannot_delete_student(teacher_client):
+    response = teacher_client.post("/students/1/delete", follow_redirects=True)
+    assert b"do not have permission" in response.data
+    assert b"Abebe Kebede" in teacher_client.get("/students").data
+
+
+def test_teacher_sees_students_without_admin_buttons(teacher_client):
+    response = teacher_client.get("/students")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"+ Add Student" not in response.data
+    assert b"Delete" not in response.data
+
+
+def test_teacher_can_take_attendance(teacher_client):
+    response = teacher_client.post(
+        "/attendance",
+        data={
+            "grade": "9",
+            "section": "A",
+            "date": "2026-10-20",
+            "status_1": "Present",
+        },
+        follow_redirects=True,
+    )
+    assert b"Attendance saved." in response.data
+
+
+def test_teacher_can_enter_marks(teacher_client):
+    response = teacher_client.post("/marks", data=marks_data(), follow_redirects=True)
+    assert b"Marks saved." in response.data
+
+
+def test_admin_can_change_role(client):
+    register(client, "boss")
+    register(client, "second")
+    login(client, "boss")
+    response = client.post(
+        "/users/2/role", data={"role": "admin"}, follow_redirects=True
+    )
+    assert b"Role updated." in response.data
+
+
+def test_admin_cannot_change_own_role(auth_client):
+    response = auth_client.post(
+        "/users/1/role", data={"role": "teacher"}, follow_redirects=True
+    )
+    assert b"cannot change your own role" in response.data
+
+
+def test_invalid_role_is_rejected(client):
+    register(client, "boss")
+    register(client, "second")
+    login(client, "boss")
+    response = client.post(
+        "/users/2/role", data={"role": "superuser"}, follow_redirects=True
+    )
+    assert b"Invalid role." in response.data
+
+
+def test_teacher_cannot_change_roles(teacher_client):
+    response = teacher_client.post(
+        "/users/1/role", data={"role": "teacher"}, follow_redirects=True
+    )
+    assert b"do not have permission" in response.data
