@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Attendance{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Attendance</h2>
+    <p>Record daily attendance for a class.</p>
+</header>
+
+<form method="GET" action="{{ url_for('attendance') }}" class="search-form">
+    <select name="grade">
+        {% for g in GRADES %}
+        <option value="{{ g }}" {{ 'selected' if grade == g|string }}>Grade {{ g }}</option>
+        {% endfor %}
+    </select>
+    <select name="section">
+        {% for s in SECTIONS %}
+        <option value="{{ s }}" {{ 'selected' if section == s }}>Section {{ s }}</option>
+        {% endfor %}
+    </select>
+    <input type="date" name="date" value="{{ date_iso }}" class="date-input">
+    <button type="submit" class="btn">Load</button>
+</form>
+
+<section class="att-summary">
+    <span class="att-pill att-present">Present: {{ summary.Present }}</span>
+    <span class="att-pill att-absent">Absent: {{ summary.Absent }}</span>
+    <span class="att-pill att-late">Late: {{ summary.Late }}</span>
+</section>
+
+<section class="panel">
+    {% if students %}
+    <form method="POST" action="{{ url_for('attendance') }}">
+        <input type="hidden" name="grade" value="{{ grade }}">
+        <input type="hidden" name="section" value="{{ section }}">
+        <input type="hidden" name="date" value="{{ date_iso }}">
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Attendance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for student in students %}
+                {% set current = records.get(student.id, 'Present') %}
+                <tr>
+                    <td>{{ student.name }}</td>
+                    <td class="att-options">
+                        {% for option in ATTENDANCE_STATUSES %}
+                        <label class="att-option">
+                            <input type="radio" name="status_{{ student.id }}"
+                                   value="{{ option }}" {{ 'checked' if current == option }}>
+                            {{ option }}
+                        </label>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <button type="submit" class="btn save-btn">Save Attendance</button>
+    </form>
+    {% else %}
+    <p>No active students in Grade {{ grade }} Section {{ section }}.</p>
+    {% endif %}
+</section>
+{% endblock %}

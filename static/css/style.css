@@ -392,3 +392,44 @@ th {
     text-align: right;
     font-weight: 600;
 }
+/* Attendance */
+.date-input {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    background: var(--surface);
+}
+
+.att-summary {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.att-pill {
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.att-present { background: #dcfce7; color: var(--green); }
+.att-absent { background: #fee2e2; color: var(--red); }
+.att-late { background: #fef3c7; color: #b45309; }
+
+.att-options {
+    display: flex;
+    gap: 18px;
+}
+
+.att-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.save-btn {
+    margin-top: 20px;
+}

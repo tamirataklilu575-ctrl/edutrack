@@ -210,3 +210,49 @@ def test_unknown_student_returns_404(auth_client):
 def test_unknown_page_returns_404(client):
     response = client.get("/does-not-exist")
     assert response.status_code == 404
+
+    
+
+# ---------------------------------------------------------------- Attendance
+
+
+def test_attendance_requires_login(client):
+    response = client.get("/attendance")
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_attendance_page_lists_class_students(auth_client):
+    response = auth_client.get("/attendance?grade=9&section=A&date=2026-10-20")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"Meron Bekele" not in response.data
+
+
+def test_attendance_save_and_summary(auth_client):
+    response = auth_client.post(
+        "/attendance",
+        data={
+            "grade": "9",
+            "section": "A",
+            "date": "2026-10-20",
+            "status_1": "Absent",
+        },
+        follow_redirects=True,
+    )
+    assert b"Attendance saved." in response.data
+    assert b"Absent: 1" in response.data
+
+
+def test_attendance_invalid_date_falls_back_to_today(auth_client):
+    response = auth_client.get("/attendance?date=not-a-date")
+    assert response.status_code == 200
+
+
+def test_delete_student_with_attendance(auth_client):
+    auth_client.post(
+        "/attendance",
+        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Late"},
+    )
+    response = auth_client.post("/students/1/delete", follow_redirects=True)
+    assert b"Student deleted." in response.data

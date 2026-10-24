@@ -3,6 +3,7 @@
 import os
 import re
 import sqlite3
+from datetime import date
 from functools import wraps
 from pathlib import Path
 
@@ -30,6 +31,7 @@ GRADES = (9, 10, 11, 12)
 SECTIONS = ("A", "B", "C", "D")
 GENDERS = ("Male", "Female")
 VALID_STATUSES = ("Active", "Inactive")
+ATTENDANCE_STATUSES = ("Present", "Absent", "Late")
 
 MIN_LENGTH = 2
 MAX_LENGTH = 100
@@ -52,6 +54,8 @@ def get_db():
     """Open a connection to the SQLite database."""
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
+    # SQLite does not enforce foreign keys unless this is switched on.
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -85,6 +89,18 @@ def init_db():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                status TEXT NOT NULL,
+                UNIQUE (student_id, date),
+                FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+            )
+            """
+        )
         count = conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
         if count == 0:
             conn.executemany(
@@ -103,6 +119,7 @@ def inject_options():
         "SECTIONS": SECTIONS,
         "GENDERS": GENDERS,
         "STATUSES": VALID_STATUSES,
+        "ATTENDANCE_STATUSES": ATTENDANCE_STATUSES,
     }
 
 
@@ -440,7 +457,7 @@ def edit_student(student_id):
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
 @login_required
 def delete_student(student_id):
-    """Delete the student with the given ID."""
+    """Delete the student (and their attendance records) with the given ID."""
     conn = get_db()
     try:
         with conn:
@@ -452,6 +469,78 @@ def delete_student(student_id):
 
     flash("Student deleted.", "success")
     return redirect(url_for("student_list"))
+
+
+# ----------------------------------------------------------- Attendance route
+
+
+@app.route("/attendance", methods=["GET", "POST"])
+@login_required
+def attendance():
+    """Show and save daily attendance for one class (grade + section)."""
+    grade = request.values.get("grade", "9")
+    if grade not in [str(g) for g in GRADES]:
+        grade = "9"
+
+    section = request.values.get("section", "A")
+    if section not in SECTIONS:
+        section = "A"
+
+    try:
+        selected_date = date.fromisoformat(request.values.get("date", ""))
+    except ValueError:
+        selected_date = date.today()
+    date_iso = selected_date.isoformat()
+
+    conn = get_db()
+    try:
+        class_students = conn.execute(
+            "SELECT * FROM students "
+            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
+            (int(grade), section),
+        ).fetchall()
+
+        if request.method == "POST":
+            records = []
+            for student in class_students:
+                value = request.form.get(f"status_{student['id']}")
+                if value in ATTENDANCE_STATUSES:
+                    records.append((student["id"], date_iso, value))
+
+            with conn:
+                conn.executemany(
+                    "INSERT INTO attendance (student_id, date, status) "
+                    "VALUES (?, ?, ?) "
+                    "ON CONFLICT (student_id, date) DO UPDATE SET status = excluded.status",
+                    records,
+                )
+            flash("Attendance saved.", "success")
+            return redirect(
+                url_for("attendance", grade=grade, section=section, date=date_iso)
+            )
+
+        rows = conn.execute(
+            "SELECT student_id, status FROM attendance WHERE date = ?", (date_iso,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    records = {row["student_id"]: row["status"] for row in rows}
+    summary = {status: 0 for status in ATTENDANCE_STATUSES}
+    for student in class_students:
+        recorded = records.get(student["id"])
+        if recorded in summary:
+            summary[recorded] += 1
+
+    return render_template(
+        "attendance.html",
+        students=class_students,
+        records=records,
+        summary=summary,
+        grade=grade,
+        section=section,
+        date_iso=date_iso,
+    )
 
 
 init_db()
