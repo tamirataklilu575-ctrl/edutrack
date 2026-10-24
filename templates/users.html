@@ -13,7 +13,7 @@
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Username</th>
+                <th>Email</th>
                 <th>Role</th>
                 <th>Actions</th>
             </tr>
@@ -23,7 +23,7 @@
             <tr>
                 <td>{{ user.id }}</td>
                 <td>
-                    {{ user.username }}
+                    {{ user.email }}
                     {% if user.id == current_user.id %}<span class="you-tag">(you)</span>{% endif %}
                 </td>
                 <td>

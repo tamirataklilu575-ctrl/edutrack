@@ -29,7 +29,7 @@
 
         <div class="sidebar-user">
             <span class="user-name">
-                👤 {{ current_user.username }}
+                👤 {{ current_user.email }}
                 <small class="role-tag">{{ current_user.role }}</small>
             </span>
             <form method="POST" action="{{ url_for('logout') }}" class="logout-form">

@@ -7,19 +7,20 @@
     <section class="panel form-panel">
         <header class="page-header">
             <h2>Log In</h2>
-            <p>Sign in to manage your students.</p>
+            <p>Sign in to manage your school.</p>
         </header>
 
         <form method="POST">
             <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username"
-                       value="{{ form.username }}" autofocus>
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email"
+                       value="{{ form.email }}" autocomplete="email" autofocus>
             </div>
 
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password">
+                <input type="password" id="password" name="password"
+                       autocomplete="current-password">
             </div>
 
             <button type="submit" class="btn">Log In</button>
@@ -30,4 +31,4 @@
         </p>
     </section>
 </div>
-{% endblock %}v
+{% endblock %}

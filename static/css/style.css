@@ -643,3 +643,7 @@ th {
         padding: 4px 3px;
     }
 }
+/* Long emails in the sidebar */
+.user-name {
+    word-break: break-all;
+}

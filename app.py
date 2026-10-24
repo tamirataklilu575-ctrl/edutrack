@@ -3,7 +3,7 @@
 import os
 import re
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from functools import wraps
 from pathlib import Path
 
@@ -24,6 +24,10 @@ app = Flask(__name__)
 # Read the secret key from the environment in production.
 # The fallback value is for local development only.
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
+# Keep users signed in for 7 days, even after the browser is closed.
+app.permanent_session_lifetime = timedelta(days=7)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 DATABASE = Path(__file__).parent / "edutrack.db"
 
@@ -50,7 +54,8 @@ MIN_LENGTH = 2
 MAX_LENGTH = 100
 PHONE_PATTERN = re.compile(r"^\+?[0-9 ]{9,15}$")
 
-USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,30}$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_EMAIL_LENGTH = 254
 MIN_PASSWORD_LENGTH = 6
 
 # (name, grade, section, gender, parent_phone, status)
@@ -80,6 +85,12 @@ def init_db():
         if columns and "grade" not in columns:
             conn.execute("DROP TABLE students")
 
+        # Development-stage migration: accounts now sign in with an email, so
+        # an older username-based users table is replaced (people re-register).
+        user_columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
+        if user_columns and "email" not in user_columns:
+            conn.execute("DROP TABLE users")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS students (
@@ -97,25 +108,12 @@ def init_db():
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'teacher'
             )
             """
         )
-
-        # Migration: databases created before roles existed get a role column.
-        # The oldest account becomes the admin; everyone else is a teacher.
-        user_columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
-        if "role" not in user_columns:
-            conn.execute(
-                "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'teacher'"
-            )
-            conn.execute(
-                "UPDATE users SET role = 'admin' "
-                "WHERE id = (SELECT MIN(id) FROM users)"
-            )
-
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS attendance (
@@ -165,7 +163,7 @@ def load_current_user():
     conn = get_db()
     try:
         g.user = conn.execute(
-            "SELECT id, username, role FROM users WHERE id = ?", (user_id,)
+            "SELECT id, email, role FROM users WHERE id = ?", (user_id,)
         ).fetchone()
     finally:
         conn.close()
@@ -262,16 +260,14 @@ def validate_student(form):
     return errors
 
 
-def validate_registration(username, password, confirm):
+def validate_registration(email, password, confirm):
     """Return a dict of field errors for the registration form."""
     errors = {}
 
-    if not username:
-        errors["username"] = "Username is required."
-    elif not USERNAME_PATTERN.match(username):
-        errors["username"] = (
-            "Username must be 3-30 characters: letters, numbers, or underscore."
-        )
+    if not email:
+        errors["email"] = "Email is required."
+    elif len(email) > MAX_EMAIL_LENGTH or not EMAIL_PATTERN.match(email):
+        errors["email"] = "Enter a valid email address."
 
     if not password:
         errors["password"] = "Password is required."
@@ -432,13 +428,14 @@ def register():
         return redirect(url_for("dashboard"))
 
     errors = {}
-    form = {"username": ""}
+    form = {"email": ""}
 
     if request.method == "POST":
-        form["username"] = request.form.get("username", "").strip()
+        # Emails are stored in lowercase so they match regardless of typing.
+        form["email"] = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
-        errors = validate_registration(form["username"], password, confirm)
+        errors = validate_registration(form["email"], password, confirm)
 
         if not errors:
             conn = get_db()
@@ -450,12 +447,12 @@ def register():
                     ).fetchone()[0]
                     role = "admin" if user_count == 0 else "teacher"
                     conn.execute(
-                        "INSERT INTO users (username, password_hash, role) "
+                        "INSERT INTO users (email, password_hash, role) "
                         "VALUES (?, ?, ?)",
-                        (form["username"], generate_password_hash(password), role),
+                        (form["email"], generate_password_hash(password), role),
                     )
             except sqlite3.IntegrityError:
-                errors["username"] = "This username is already taken."
+                errors["email"] = "This email is already registered."
             finally:
                 conn.close()
 
@@ -472,28 +469,30 @@ def login():
     if g.user is not None:
         return redirect(url_for("dashboard"))
 
-    form = {"username": ""}
+    form = {"email": ""}
 
     if request.method == "POST":
-        form["username"] = request.form.get("username", "").strip()
+        form["email"] = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
         conn = get_db()
         try:
             user = conn.execute(
-                "SELECT * FROM users WHERE username = ?", (form["username"],)
+                "SELECT * FROM users WHERE email = ?", (form["email"],)
             ).fetchone()
         finally:
             conn.close()
 
         if user is not None and check_password_hash(user["password_hash"], password):
             session.clear()
+            # A permanent session survives closing the browser (up to 7 days).
+            session.permanent = True
             session["user_id"] = user["id"]
-            flash(f"Welcome back, {user['username']}!", "success")
+            flash(f"Welcome back, {user['email']}!", "success")
             return redirect(url_for("dashboard"))
 
-        # Same message for unknown user and wrong password (security best practice).
-        flash("Invalid username or password.", "error")
+        # Same message for unknown email and wrong password (security best practice).
+        flash("Invalid email or password.", "error")
 
     return render_template("login.html", form=form)
 
@@ -516,7 +515,7 @@ def user_list():
     conn = get_db()
     try:
         users = conn.execute(
-            "SELECT id, username, role FROM users ORDER BY id"
+            "SELECT id, email, role FROM users ORDER BY id"
         ).fetchall()
     finally:
         conn.close()

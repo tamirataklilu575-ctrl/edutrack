@@ -1,8 +1,12 @@
 """Automated tests for EduTrack (high school edition)."""
 
+import sqlite3
+
 import pytest
 
 import app as app_module
+
+TEST_EMAIL = "tester@example.com"
 
 VALID_STUDENT = {
     "name": "Test Student",
@@ -12,6 +16,48 @@ VALID_STUDENT = {
     "parent_phone": "",
     "status": "Active",
 }
+
+
+# ------------------------------------------------------------------- Helpers
+
+
+def register(client, email, password="secret123"):
+    """Register an account through the form."""
+    return client.post(
+        "/register",
+        data={"email": email, "password": password, "confirm": password},
+    )
+
+
+def login(client, email, password="secret123"):
+    """Log in through the form."""
+    return client.post("/login", data={"email": email, "password": password})
+
+
+def student_data(**overrides):
+    """Return valid student form data with optional overrides."""
+    return {**VALID_STUDENT, **overrides}
+
+
+def marks_data(**overrides):
+    """Return valid marks form data for Grade 9 Section A (student 1)."""
+    data = {
+        "grade": "9",
+        "section": "A",
+        "subject": "Mathematics",
+        "term": "Semester 1",
+        "score_1": "85",
+    }
+    data.update(overrides)
+    return data
+
+
+def add_second_student(client):
+    """Add a second Grade 9 Section A student (it gets ID 6)."""
+    client.post("/students/add", data=student_data(name="Second Student"))
+
+
+# ------------------------------------------------------------------ Fixtures
 
 
 @pytest.fixture
@@ -26,18 +72,19 @@ def client(tmp_path, monkeypatch):
 
 @pytest.fixture
 def auth_client(client):
-    """A test client that is already registered and logged in."""
-    client.post(
-        "/register",
-        data={"username": "tester", "password": "secret123", "confirm": "secret123"},
-    )
-    client.post("/login", data={"username": "tester", "password": "secret123"})
+    """A test client that is registered (as the admin) and logged in."""
+    register(client, TEST_EMAIL)
+    login(client, TEST_EMAIL)
     return client
 
 
-def student_data(**overrides):
-    """Return valid student form data with optional overrides."""
-    return {**VALID_STUDENT, **overrides}
+@pytest.fixture
+def teacher_client(client):
+    """A client logged in as a teacher (the first account, 'boss', is the admin)."""
+    register(client, "boss@example.com")
+    register(client, "teacher1@example.com")
+    login(client, "teacher1@example.com")
+    return client
 
 
 # ------------------------------------------------------------ Authentication
@@ -58,7 +105,11 @@ def test_students_requires_login(client):
 def test_register_success(client):
     response = client.post(
         "/register",
-        data={"username": "newuser", "password": "secret123", "confirm": "secret123"},
+        data={
+            "email": "newuser@example.com",
+            "password": "secret123",
+            "confirm": "secret123",
+        },
         follow_redirects=True,
     )
     assert b"Account created!" in response.data
@@ -67,7 +118,11 @@ def test_register_success(client):
 def test_register_password_mismatch(client):
     response = client.post(
         "/register",
-        data={"username": "newuser", "password": "secret123", "confirm": "different"},
+        data={
+            "email": "newuser@example.com",
+            "password": "secret123",
+            "confirm": "different",
+        },
     )
     assert b"Passwords do not match." in response.data
 
@@ -75,46 +130,91 @@ def test_register_password_mismatch(client):
 def test_register_short_password(client):
     response = client.post(
         "/register",
-        data={"username": "newuser", "password": "123", "confirm": "123"},
+        data={"email": "newuser@example.com", "password": "123", "confirm": "123"},
     )
     assert b"at least 6 characters" in response.data
 
 
-def test_register_duplicate_username(client):
-    data = {"username": "dup_user", "password": "secret123", "confirm": "secret123"}
-    client.post("/register", data=data)
-    response = client.post("/register", data=data)
-    assert b"already taken" in response.data
+def test_register_invalid_email(client):
+    response = client.post(
+        "/register",
+        data={"email": "not-an-email", "password": "secret123", "confirm": "secret123"},
+    )
+    assert b"Enter a valid email address." in response.data
+
+
+def test_register_duplicate_email(client):
+    register(client, "dup@example.com")
+    response = register(client, "dup@example.com")
+    assert b"already registered" in response.data
+
+
+def test_register_duplicate_email_ignores_letter_case(client):
+    register(client, "Dup@Example.com")
+    response = register(client, "dup@example.com")
+    assert b"already registered" in response.data
 
 
 def test_login_success(client):
-    client.post(
-        "/register",
-        data={"username": "tester", "password": "secret123", "confirm": "secret123"},
-    )
+    register(client, TEST_EMAIL)
     response = client.post(
         "/login",
-        data={"username": "tester", "password": "secret123"},
+        data={"email": TEST_EMAIL, "password": "secret123"},
         follow_redirects=True,
     )
-    assert b"Welcome back, tester!" in response.data
+    assert b"Welcome back, tester@example.com!" in response.data
+
+
+def test_login_email_ignores_letter_case(client):
+    register(client, "Mixed@Example.com")
+    response = client.post(
+        "/login",
+        data={"email": "MIXED@example.com", "password": "secret123"},
+        follow_redirects=True,
+    )
+    assert b"Welcome back, mixed@example.com!" in response.data
 
 
 def test_login_wrong_password(client):
-    client.post(
-        "/register",
-        data={"username": "tester", "password": "secret123", "confirm": "secret123"},
-    )
+    register(client, TEST_EMAIL)
     response = client.post(
-        "/login", data={"username": "tester", "password": "wrongpass"}
+        "/login", data={"email": TEST_EMAIL, "password": "wrongpass"}
     )
-    assert b"Invalid username or password." in response.data
+    assert b"Invalid email or password." in response.data
+
+
+def test_login_session_cookie_is_persistent(client):
+    register(client, TEST_EMAIL)
+    response = login(client, TEST_EMAIL)
+    cookies = response.headers.getlist("Set-Cookie")
+    # A cookie with an expiry date survives closing the browser.
+    assert any("Expires=" in cookie for cookie in cookies)
 
 
 def test_logout(auth_client):
     response = auth_client.post("/logout", follow_redirects=True)
     assert b"You have been logged out." in response.data
     assert auth_client.get("/").status_code == 302
+
+
+def test_old_username_users_table_is_replaced(tmp_path, monkeypatch):
+    db_path = tmp_path / "old.db"
+    monkeypatch.setattr(app_module, "DATABASE", db_path)
+
+    old = sqlite3.connect(db_path)
+    old.execute(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, password_hash TEXT)"
+    )
+    old.commit()
+    old.close()
+
+    app_module.init_db()
+
+    check = sqlite3.connect(db_path)
+    columns = [row[1] for row in check.execute("PRAGMA table_info(users)")]
+    check.close()
+    assert "email" in columns
+    assert "username" not in columns
 
 
 # ------------------------------------------------------------------ Students
@@ -211,7 +311,6 @@ def test_unknown_page_returns_404(client):
     response = client.get("/does-not-exist")
     assert response.status_code == 404
 
-    
 
 # ---------------------------------------------------------------- Attendance
 
@@ -257,25 +356,11 @@ def test_delete_student_with_attendance(auth_client):
     response = auth_client.post("/students/1/delete", follow_redirects=True)
     assert b"Student deleted." in response.data
 
-    
 
 # --------------------------------------------------------------------- Marks
 
 
 MARKS_QUERY = "grade=9&section=A&subject=Mathematics&term=Semester+1"
-
-
-def marks_data(**overrides):
-    """Return valid marks form data for Grade 9 Section A (student 1)."""
-    data = {
-        "grade": "9",
-        "section": "A",
-        "subject": "Mathematics",
-        "term": "Semester 1",
-        "score_1": "85",
-    }
-    data.update(overrides)
-    return data
 
 
 def test_marks_requires_login(client):
@@ -322,31 +407,8 @@ def test_delete_student_with_marks(auth_client):
     response = auth_client.post("/students/1/delete", follow_redirects=True)
     assert b"Student deleted." in response.data
 
-    
 
 # --------------------------------------------------------------------- Roles
-
-
-def register(client, username, password="secret123"):
-    """Register an account through the form."""
-    return client.post(
-        "/register",
-        data={"username": username, "password": password, "confirm": password},
-    )
-
-
-def login(client, username, password="secret123"):
-    """Log in through the form."""
-    return client.post("/login", data={"username": username, "password": password})
-
-
-@pytest.fixture
-def teacher_client(client):
-    """A client logged in as a teacher (the first account, 'boss', is the admin)."""
-    register(client, "boss")
-    register(client, "teacher1")
-    login(client, "teacher1")
-    return client
 
 
 def test_first_user_is_admin(auth_client):
@@ -402,9 +464,9 @@ def test_teacher_can_enter_marks(teacher_client):
 
 
 def test_admin_can_change_role(client):
-    register(client, "boss")
-    register(client, "second")
-    login(client, "boss")
+    register(client, "boss@example.com")
+    register(client, "second@example.com")
+    login(client, "boss@example.com")
     response = client.post(
         "/users/2/role", data={"role": "admin"}, follow_redirects=True
     )
@@ -419,9 +481,9 @@ def test_admin_cannot_change_own_role(auth_client):
 
 
 def test_invalid_role_is_rejected(client):
-    register(client, "boss")
-    register(client, "second")
-    login(client, "boss")
+    register(client, "boss@example.com")
+    register(client, "second@example.com")
+    login(client, "boss@example.com")
     response = client.post(
         "/users/2/role", data={"role": "superuser"}, follow_redirects=True
     )
@@ -434,7 +496,6 @@ def test_teacher_cannot_change_roles(teacher_client):
     )
     assert b"do not have permission" in response.data
 
-    
 
 # --------------------------------------------------------------- Report card
 
@@ -506,14 +567,8 @@ def test_students_list_has_report_link(auth_client):
     response = auth_client.get("/students")
     assert b"/students/1/report" in response.data
 
-    
 
 # -------------------------------------------------------------- Class report
-
-
-def add_second_student(client):
-    """Add a second Grade 9 Section A student (it gets ID 6)."""
-    client.post("/students/add", data=student_data(name="Second Student"))
 
 
 def test_class_report_requires_login(client):
