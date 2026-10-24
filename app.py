@@ -29,7 +29,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 app.permanent_session_lifetime = timedelta(days=7)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
+# Local development uses a SQLite file. When DATABASE_URL is set (for example
+# on Render), the app uses that PostgreSQL database instead.
 DATABASE = Path(__file__).parent / "edutrack.db"
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 # Allowed values for student fields.
 GRADES = (9, 10, 11, 12)
@@ -68,85 +71,175 @@ SEED_STUDENTS = [
 ]
 
 
+# ------------------------------------------------------------------ Database
+
+
+def using_postgres():
+    """Return True when a PostgreSQL connection string is configured."""
+    return bool(DATABASE_URL)
+
+
+class Database:
+    """A thin wrapper so the same code works with SQLite and PostgreSQL.
+
+    - Queries are written with ``?`` placeholders; they are converted for
+      PostgreSQL automatically.
+    - ``with db:`` commits on success and rolls back on error, but keeps the
+      connection open. Call ``close()`` when you are finished.
+    """
+
+    def __init__(self, raw, postgres):
+        self.raw = raw
+        self.postgres = postgres
+
+    def convert_sql(self, sql):
+        """Convert ``?`` placeholders to ``%s`` when talking to PostgreSQL."""
+        return sql.replace("?", "%s") if self.postgres else sql
+
+    def execute(self, sql, params=()):
+        cursor = self.raw.cursor()
+        cursor.execute(self.convert_sql(sql), params)
+        return cursor
+
+    def executemany(self, sql, params_list):
+        cursor = self.raw.cursor()
+        cursor.executemany(self.convert_sql(sql), params_list)
+        return cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type is None:
+            self.raw.commit()
+        else:
+            self.raw.rollback()
+        return False
+
+    def close(self):
+        self.raw.close()
+
+
 def get_db():
-    """Open a connection to the SQLite database."""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
+    """Open a connection to PostgreSQL (if configured) or to the SQLite file."""
+    if using_postgres():
+        # Imported here so local development does not need psycopg installed.
+        import psycopg
+        from psycopg.rows import dict_row
+
+        raw = psycopg.connect(
+            DATABASE_URL,
+            row_factory=dict_row,
+            connect_timeout=15,
+            prepare_threshold=None,
+        )
+        return Database(raw, postgres=True)
+
+    raw = sqlite3.connect(DATABASE)
+    raw.row_factory = sqlite3.Row
     # SQLite does not enforce foreign keys unless this is switched on.
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    raw.execute("PRAGMA foreign_keys = ON")
+    return Database(raw, postgres=False)
+
+
+def integrity_errors():
+    """Return the exception types raised when a UNIQUE rule is broken."""
+    if using_postgres():
+        import psycopg
+
+        return (psycopg.IntegrityError,)
+    return (sqlite3.IntegrityError,)
 
 
 def init_db():
-    """Create tables, migrate older databases, and add sample students."""
-    with get_db() as conn:
-        # Development-stage migration: replace the old university-style table.
-        columns = [row["name"] for row in conn.execute("PRAGMA table_info(students)")]
-        if columns and "grade" not in columns:
-            conn.execute("DROP TABLE students")
+    """Create tables, migrate older SQLite files, and add sample students."""
+    conn = get_db()
+    try:
+        with conn:
+            if not conn.postgres:
+                # Development-stage migration: replace the old university table.
+                columns = [
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(students)").fetchall()
+                ]
+                if columns and "grade" not in columns:
+                    conn.execute("DROP TABLE students")
 
-        # Development-stage migration: accounts now sign in with an email, so
-        # an older username-based users table is replaced (people re-register).
-        user_columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
-        if user_columns and "email" not in user_columns:
-            conn.execute("DROP TABLE users")
+                # Development-stage migration: accounts now sign in with an
+                # email, so an older username-based table is replaced.
+                user_columns = [
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(users)").fetchall()
+                ]
+                if user_columns and "email" not in user_columns:
+                    conn.execute("DROP TABLE users")
 
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                grade INTEGER NOT NULL,
-                section TEXT NOT NULL,
-                gender TEXT NOT NULL,
-                parent_phone TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'Active'
+            # Primary-key syntax differs between the two databases.
+            pk = "SERIAL PRIMARY KEY" if conn.postgres else (
+                "INTEGER PRIMARY KEY AUTOINCREMENT"
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'teacher'
+
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS students (
+                    id {pk},
+                    name TEXT NOT NULL,
+                    grade INTEGER NOT NULL,
+                    section TEXT NOT NULL,
+                    gender TEXT NOT NULL,
+                    parent_phone TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'Active'
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS attendance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                date TEXT NOT NULL,
-                status TEXT NOT NULL,
-                UNIQUE (student_id, date),
-                FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS users (
+                    id {pk},
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'teacher'
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS marks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                subject TEXT NOT NULL,
-                term TEXT NOT NULL,
-                score REAL NOT NULL,
-                UNIQUE (student_id, subject, term),
-                FOREIGN KEY (student_id) REFERENCES students (id) ON DELETE CASCADE
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS attendance (
+                    id {pk},
+                    student_id INTEGER NOT NULL,
+                    date TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    UNIQUE (student_id, date),
+                    FOREIGN KEY (student_id) REFERENCES students (id)
+                        ON DELETE CASCADE
+                )
+                """
             )
-            """
-        )
-        count = conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
-        if count == 0:
-            conn.executemany(
-                "INSERT INTO students "
-                "(name, grade, section, gender, parent_phone, status) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                SEED_STUDENTS,
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS marks (
+                    id {pk},
+                    student_id INTEGER NOT NULL,
+                    subject TEXT NOT NULL,
+                    term TEXT NOT NULL,
+                    score DOUBLE PRECISION NOT NULL,
+                    UNIQUE (student_id, subject, term),
+                    FOREIGN KEY (student_id) REFERENCES students (id)
+                        ON DELETE CASCADE
+                )
+                """
             )
+
+            count = conn.execute("SELECT COUNT(*) AS total FROM students").fetchone()
+            if count["total"] == 0:
+                conn.executemany(
+                    "INSERT INTO students "
+                    "(name, grade, section, gender, parent_phone, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    SEED_STUDENTS,
+                )
+    finally:
+        conn.close()
 
 
 @app.before_request
@@ -443,15 +536,15 @@ def register():
                 with conn:
                     # The very first account becomes the admin.
                     user_count = conn.execute(
-                        "SELECT COUNT(*) FROM users"
-                    ).fetchone()[0]
+                        "SELECT COUNT(*) AS total FROM users"
+                    ).fetchone()["total"]
                     role = "admin" if user_count == 0 else "teacher"
                     conn.execute(
                         "INSERT INTO users (email, password_hash, role) "
                         "VALUES (?, ?, ?)",
                         (form["email"], generate_password_hash(password), role),
                     )
-            except sqlite3.IntegrityError:
+            except integrity_errors():
                 errors["email"] = "This email is already registered."
             finally:
                 conn.close()
@@ -603,7 +696,8 @@ def student_list():
     params = []
 
     if query:
-        conditions.append("name LIKE ?")
+        # LOWER() on both sides gives a case-insensitive search in both databases.
+        conditions.append("LOWER(name) LIKE LOWER(?)")
         params.append(f"%{query}%")
     if grade_filter in [str(g) for g in GRADES]:
         conditions.append("grade = ?")
