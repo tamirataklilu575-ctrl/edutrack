@@ -299,6 +299,123 @@ def average_remark(average):
     return "Needs Improvement"
 
 
+def build_class_report(class_students, mark_rows):
+    """Compute per-student results, per-subject statistics, and class totals.
+
+    Returns a tuple: (rows, subject_stats, summary).
+    Rows are sorted by rank; students with no marks come last.
+    """
+    scores_by_student = {}
+    for row in mark_rows:
+        student_scores = scores_by_student.setdefault(row["student_id"], {})
+        student_scores[row["subject"]] = row["score"]
+
+    # One row per student, with a score cell for every subject.
+    rows = []
+    for student in class_students:
+        scores = scores_by_student.get(student["id"], {})
+
+        cells = []
+        for subject in SUBJECTS:
+            score = scores.get(subject)
+            cells.append(
+                {
+                    "text": "—" if score is None else f"{score:g}",
+                    "failed": score is not None and score < PASS_MARK,
+                }
+            )
+
+        row = {
+            "student": student,
+            "cells": cells,
+            "average": None,
+            "rank": None,
+            "rank_text": "—",
+            "total_text": "—",
+            "average_text": "—",
+            "remark": "",
+            "result": "",
+        }
+
+        if scores:
+            total = sum(scores.values())
+            average = total / len(scores)
+            row["average"] = average
+            row["total_text"] = f"{total:g}"
+            row["average_text"] = f"{average:.1f}"
+            row["remark"] = average_remark(average)
+            row["result"] = "Pass" if average >= PASS_MARK else "Fail"
+
+        rows.append(row)
+
+    # Rank by average. Equal averages share the same rank (1, 1, 3, ...).
+    ranked = [row for row in rows if row["average"] is not None]
+    for row in ranked:
+        row["rank"] = 1 + sum(
+            1 for other in ranked if other["average"] > row["average"]
+        )
+        row["rank_text"] = str(row["rank"])
+
+    ranked.sort(key=lambda row: (row["rank"], row["student"]["name"]))
+    unranked = [row for row in rows if row["average"] is None]
+    rows = ranked + unranked
+
+    # Statistics for each subject across the whole class.
+    subject_stats = []
+    for subject in SUBJECTS:
+        values = [
+            scores_by_student.get(student["id"], {}).get(subject)
+            for student in class_students
+        ]
+        values = [value for value in values if value is not None]
+
+        if values:
+            passed = sum(1 for value in values if value >= PASS_MARK)
+            subject_stats.append(
+                {
+                    "subject": subject,
+                    "average": f"{sum(values) / len(values):.1f}",
+                    "highest": f"{max(values):g}",
+                    "lowest": f"{min(values):g}",
+                    "pass_rate": f"{round(passed * 100 / len(values))}%",
+                }
+            )
+        else:
+            subject_stats.append(
+                {
+                    "subject": subject,
+                    "average": "—",
+                    "highest": "—",
+                    "lowest": "—",
+                    "pass_rate": "—",
+                }
+            )
+
+    # Class-wide summary.
+    if ranked:
+        averages = [row["average"] for row in ranked]
+        passed_students = sum(1 for row in ranked if row["result"] == "Pass")
+        summary = {
+            "students": len(class_students),
+            "with_marks": len(ranked),
+            "class_average": f"{sum(averages) / len(averages):.1f}",
+            "pass_rate": f"{round(passed_students * 100 / len(ranked))}%",
+            "top": ", ".join(
+                row["student"]["name"] for row in ranked if row["rank"] == 1
+            ),
+        }
+    else:
+        summary = {
+            "students": len(class_students),
+            "with_marks": 0,
+            "class_average": "—",
+            "pass_rate": "—",
+            "top": "—",
+        }
+
+    return rows, subject_stats, summary
+
+
 @app.errorhandler(404)
 def page_not_found(error):
     """Render a friendly page when a URL or student does not exist."""
@@ -713,6 +830,54 @@ def report_card(student_id):
         attendance_counts=attendance_counts,
         days_recorded=days_recorded,
         attendance_rate=attendance_rate,
+    )
+
+
+@app.route("/class-report")
+@login_required
+def class_report():
+    """Show every student's marks, average, and rank for one class and term."""
+    grade = request.args.get("grade", "9")
+    if grade not in [str(g) for g in GRADES]:
+        grade = "9"
+
+    section = request.args.get("section", "A")
+    if section not in SECTIONS:
+        section = "A"
+
+    term = request.args.get("term", TERMS[0])
+    if term not in TERMS:
+        term = TERMS[0]
+
+    conn = get_db()
+    try:
+        class_students = conn.execute(
+            "SELECT * FROM students "
+            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
+            (int(grade), section),
+        ).fetchall()
+
+        mark_rows = conn.execute(
+            "SELECT m.student_id AS student_id, m.subject AS subject, "
+            "m.score AS score "
+            "FROM marks m JOIN students s ON s.id = m.student_id "
+            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
+            "AND m.term = ?",
+            (int(grade), section, term),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    rows, subject_stats, summary = build_class_report(class_students, mark_rows)
+
+    return render_template(
+        "class_report.html",
+        rows=rows,
+        subject_stats=subject_stats,
+        summary=summary,
+        grade=grade,
+        section=section,
+        term=term,
     )
 
 

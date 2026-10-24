@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Class Report{% endblock %}
+
+{% block content %}
+<header class="page-header page-header-row no-print">
+    <div>
+        <h2>Class Report</h2>
+        <p>Scores, averages, and ranks for a whole class.</p>
+    </div>
+    <button type="button" class="btn" onclick="window.print()">Print</button>
+</header>
+
+<form method="GET" action="{{ url_for('class_report') }}"
+      class="search-form filter-wrap no-print">
+    <select name="grade">
+        {% for g in GRADES %}
+        <option value="{{ g }}" {{ 'selected' if grade == g|string }}>Grade {{ g }}</option>
+        {% endfor %}
+    </select>
+    <select name="section">
+        {% for s in SECTIONS %}
+        <option value="{{ s }}" {{ 'selected' if section == s }}>Section {{ s }}</option>
+        {% endfor %}
+    </select>
+    <select name="term">
+        {% for t in TERMS %}
+        <option value="{{ t }}" {{ 'selected' if term == t }}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn">Show</button>
+</form>
+
+{% if rows %}
+<section class="stats-grid">
+    <div class="card">
+        <span class="card-label">Students</span>
+        <span class="card-value">{{ summary.students }}</span>
+        <span class="card-note">{{ summary.with_marks }} with marks</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Class Average</span>
+        <span class="card-value">{{ summary.class_average }}</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Pass Rate</span>
+        <span class="card-value text-green">{{ summary.pass_rate }}</span>
+        <span class="card-note">Average of {{ 50 }} or more</span>
+    </div>
+    <div class="card">
+        <span class="card-label">Top Performer</span>
+        <span class="card-value-small">{{ summary.top }}</span>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="report-head">
+        <h3>EduTrack High School</h3>
+        <p>Class Report &middot; Grade {{ grade }} &middot; Section {{ section }} &middot; {{ term }}</p>
+    </div>
+
+    <table class="class-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Name</th>
+                {% for subject in SUBJECTS %}
+                <th class="num">{{ subject }}</th>
+                {% endfor %}
+                <th class="num">Total</th>
+                <th class="num">Average</th>
+                <th>Remark</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="rank-cell">{{ row.rank_text }}</td>
+                <td>
+                    <a href="{{ url_for('report_card', student_id=row.student.id, term=term) }}">{{ row.student.name }}</a>
+                </td>
+                {% for cell in row.cells %}
+                <td class="num {{ 'cell-fail' if cell.failed }}">{{ cell.text }}</td>
+                {% endfor %}
+                <td class="num">{{ row.total_text }}</td>
+                <td class="num"><strong>{{ row.average_text }}</strong></td>
+                <td>{{ row.remark or '—' }}</td>
+                <td>
+                    {% if row.result == 'Pass' %}
+                    <span class="badge badge-active">Pass</span>
+                    {% elif row.result == 'Fail' %}
+                    <span class="badge badge-inactive">Fail</span>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <th colspan="2">Subject Average</th>
+                {% for stat in subject_stats %}<td class="num">{{ stat.average }}</td>{% endfor %}
+                <td colspan="4"></td>
+            </tr>
+            <tr>
+                <th colspan="2">Highest</th>
+                {% for stat in subject_stats %}<td class="num">{{ stat.highest }}</td>{% endfor %}
+                <td colspan="4"></td>
+            </tr>
+            <tr>
+                <th colspan="2">Lowest</th>
+                {% for stat in subject_stats %}<td class="num">{{ stat.lowest }}</td>{% endfor %}
+                <td colspan="4"></td>
+            </tr>
+            <tr>
+                <th colspan="2">Pass Rate</th>
+                {% for stat in subject_stats %}<td class="num">{{ stat.pass_rate }}</td>{% endfor %}
+                <td colspan="4"></td>
+            </tr>
+        </tfoot>
+    </table>
+</section>
+{% else %}
+<section class="panel">
+    <p>No active students in Grade {{ grade }} Section {{ section }}.</p>
+</section>
+{% endif %}
+{% endblock %}

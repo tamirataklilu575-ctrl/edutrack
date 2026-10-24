@@ -505,3 +505,78 @@ def test_teacher_can_view_report_card(teacher_client):
 def test_students_list_has_report_link(auth_client):
     response = auth_client.get("/students")
     assert b"/students/1/report" in response.data
+
+    
+
+# -------------------------------------------------------------- Class report
+
+
+def add_second_student(client):
+    """Add a second Grade 9 Section A student (it gets ID 6)."""
+    client.post("/students/add", data=student_data(name="Second Student"))
+
+
+def test_class_report_requires_login(client):
+    response = client.get("/class-report")
+    assert response.status_code == 302
+    assert "/login" in response.headers["Location"]
+
+
+def test_class_report_lists_only_the_selected_class(auth_client):
+    response = auth_client.get("/class-report?grade=9&section=A")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"Meron Bekele" not in response.data
+
+
+def test_class_report_sorts_students_by_rank(auth_client):
+    add_second_student(auth_client)
+    auth_client.post("/marks", data=marks_data(score_1="85", score_6="95"))
+
+    response = auth_client.get("/class-report?grade=9&section=A&term=Semester+1")
+    table = response.data[response.data.index(b"class-table"):]
+
+    # Second Student scored higher, so they appear before Abebe despite the name order.
+    assert table.index(b"Second Student") < table.index(b"Abebe Kebede")
+
+
+def test_class_report_equal_averages_share_a_rank(auth_client):
+    add_second_student(auth_client)
+    auth_client.post("/marks", data=marks_data(score_1="80", score_6="80"))
+
+    response = auth_client.get("/class-report?grade=9&section=A&term=Semester+1")
+    assert response.data.count(b'<td class="rank-cell">1</td>') == 2
+
+
+def test_class_report_summary_and_failing_scores(auth_client):
+    add_second_student(auth_client)
+    auth_client.post("/marks", data=marks_data(score_1="85", score_6="30"))
+
+    response = auth_client.get("/class-report?grade=9&section=A&term=Semester+1")
+    assert b"cell-fail" in response.data
+    assert b"Needs Improvement" in response.data
+    assert b"57.5" in response.data  # class average of 85 and 30
+    assert b"50%" in response.data  # one of two students passed
+
+
+def test_class_report_without_marks(auth_client):
+    response = auth_client.get("/class-report?grade=9&section=A")
+    assert response.status_code == 200
+    assert b"Abebe Kebede" in response.data
+    assert b"0 with marks" in response.data
+
+
+def test_class_report_empty_class(auth_client):
+    response = auth_client.get("/class-report?grade=12&section=D")
+    assert response.status_code == 200
+    assert b"No active students" in response.data
+
+
+def test_class_report_invalid_filters_fall_back(auth_client):
+    response = auth_client.get("/class-report?grade=99&section=Z&term=bogus")
+    assert response.status_code == 200
+
+
+def test_teacher_can_view_class_report(teacher_client):
+    response = teacher_client.get("/class-report")
+    assert response.status_code == 200
