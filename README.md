@@ -19,7 +19,7 @@ access, form validation, automated testing, and deployment.
 - Persistent sessions (users stay signed in for 7 days)
 - **Roles:** admins manage students and users; teachers take attendance and
   enter marks
-- Dashboard with summary statistics and a students-by-grade chart
+- Dashboard with summary statistics, a students-by-grade chart, and today's attendance (present, absent, late, and classes still pending)
 - Student records: grade (9-12), section, gender, and parent phone
 - Search by name and filter by grade
 - Daily **attendance** per class (Present / Absent / Late)
@@ -128,7 +128,7 @@ web service.
 - [ ] Email verification and password reset
 - [ ] Export reports to CSV
 - [ ] Pagination
-- [ ] Attendance summary on the dashboard
+- [x] Attendance summary on the dashboard
 
 ## License
 

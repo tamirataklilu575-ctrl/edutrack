@@ -647,3 +647,41 @@ th {
 .user-name {
     word-break: break-all;
 }
+/* Dashboard: attendance today */
+.panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.panel-head h3 {
+    margin-bottom: 0;
+}
+
+.panel-date {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.text-amber { color: #b45309; }
+.text-gray { color: var(--muted); }
+
+.muted-note {
+    margin-bottom: 16px;
+    color: var(--muted);
+}
+
+.muted-note a,
+.table-link {
+    color: var(--primary);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.muted-note a:hover,
+.table-link:hover {
+    text-decoration: underline;
+}

@@ -3,7 +3,7 @@
 import os
 import re
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -33,6 +33,10 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # on Render), the app uses that PostgreSQL database instead.
 DATABASE = Path(__file__).parent / "edutrack.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+
+# Ethiopia is UTC+3 all year (no daylight saving time). Servers usually run on
+# UTC, so "today" is calculated with this offset instead.
+SCHOOL_UTC_OFFSET_HOURS = 3
 
 # Allowed values for student fields.
 GRADES = (9, 10, 11, 12)
@@ -242,6 +246,12 @@ def init_db():
         conn.close()
 
 
+def today_local():
+    """Return today's date in the school's time zone (Ethiopia, UTC+3)."""
+    school_zone = timezone(timedelta(hours=SCHOOL_UTC_OFFSET_HOURS))
+    return datetime.now(school_zone).date()
+
+
 @app.before_request
 def load_current_user():
     """Load the signed-in user (with their current role) for this request."""
@@ -386,6 +396,58 @@ def average_remark(average):
     if average >= PASS_MARK:
         return "Satisfactory"
     return "Needs Improvement"
+
+
+def build_today_attendance(active_students, attendance_rows):
+    """Summarise one day's attendance for the dashboard.
+
+    ``active_students`` are the students expected in school. A student with no
+    record that day counts as "Pending" (not recorded yet), never as absent.
+    Late counts as attended, matching the report card.
+    """
+    status_by_student = {row["student_id"]: row["status"] for row in attendance_rows}
+
+    counts = {"Present": 0, "Absent": 0, "Late": 0, "Pending": 0}
+    classes = {}
+
+    for student in active_students:
+        status = status_by_student.get(student["id"])
+        if status not in ATTENDANCE_STATUSES:
+            status = "Pending"
+        counts[status] += 1
+
+        key = (student["grade"], student["section"])
+        class_row = classes.setdefault(
+            key,
+            {
+                "grade": key[0],
+                "section": key[1],
+                "total": 0,
+                "Present": 0,
+                "Absent": 0,
+                "Late": 0,
+                "Pending": 0,
+            },
+        )
+        class_row["total"] += 1
+        class_row[status] += 1
+
+    total = len(active_students)
+    recorded = total - counts["Pending"]
+
+    if recorded:
+        attended = counts["Present"] + counts["Late"]
+        rate_text = f"{round(attended * 100 / recorded)}%"
+    else:
+        rate_text = "—"
+
+    return {
+        "counts": counts,
+        "total": total,
+        "recorded": recorded,
+        "rate_text": rate_text,
+        "classes": [classes[key] for key in sorted(classes)],
+    }
 
 
 def build_class_report(class_students, mark_rows):
@@ -651,17 +713,25 @@ def change_role(user_id):
 @app.route("/")
 @login_required
 def dashboard():
-    """Render the main dashboard with summary statistics."""
+    """Render the main dashboard with statistics and today's attendance."""
+    today = today_local()
+
     conn = get_db()
     try:
         all_students = conn.execute(
             "SELECT * FROM students ORDER BY id DESC"
         ).fetchall()
+        today_rows = conn.execute(
+            "SELECT student_id, status FROM attendance WHERE date = ?",
+            (today.isoformat(),),
+        ).fetchall()
     finally:
         conn.close()
 
+    active_students = [s for s in all_students if s["status"] == "Active"]
+
     total = len(all_students)
-    active = sum(1 for s in all_students if s["status"] == "Active")
+    active = len(active_students)
     classes = len({(s["grade"], s["section"]) for s in all_students})
 
     by_grade = []
@@ -681,6 +751,9 @@ def dashboard():
         stats=stats,
         by_grade=by_grade,
         recent_students=all_students[:5],
+        today_attendance=build_today_attendance(active_students, today_rows),
+        today_iso=today.isoformat(),
+        today_label=today.strftime("%A, %B %d, %Y"),
     )
 
 
@@ -992,7 +1065,7 @@ def attendance():
     try:
         selected_date = date.fromisoformat(request.values.get("date", ""))
     except ValueError:
-        selected_date = date.today()
+        selected_date = today_local()
     date_iso = selected_date.isoformat()
 
     conn = get_db()

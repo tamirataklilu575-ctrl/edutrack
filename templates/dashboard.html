@@ -28,6 +28,79 @@
 </section>
 
 <section class="panel section-gap">
+    <div class="panel-head">
+        <h3>Attendance Today</h3>
+        <span class="panel-date">{{ today_label }}</span>
+    </div>
+
+    {% if today_attendance.recorded == 0 %}
+    <p class="muted-note">
+        No attendance has been recorded today yet.
+        <a href="{{ url_for('attendance', date=today_iso) }}">Take attendance</a>
+    </p>
+    {% endif %}
+
+    <div class="stats-grid">
+        <div class="card">
+            <span class="card-label">Present</span>
+            <span class="card-value text-green" data-testid="present">{{ today_attendance.counts.Present }}</span>
+        </div>
+        <div class="card">
+            <span class="card-label">Absent</span>
+            <span class="card-value text-red" data-testid="absent">{{ today_attendance.counts.Absent }}</span>
+        </div>
+        <div class="card">
+            <span class="card-label">Late</span>
+            <span class="card-value text-amber" data-testid="late">{{ today_attendance.counts.Late }}</span>
+        </div>
+        <div class="card">
+            <span class="card-label">Not Recorded</span>
+            <span class="card-value text-gray" data-testid="pending">{{ today_attendance.counts.Pending }}</span>
+            <span class="card-note">of {{ today_attendance.total }} active students</span>
+        </div>
+        <div class="card">
+            <span class="card-label">Attendance Rate</span>
+            <span class="card-value" data-testid="rate">{{ today_attendance.rate_text }}</span>
+            <span class="card-note">Late counts as attended</span>
+        </div>
+    </div>
+
+    {% if today_attendance.classes %}
+    <table>
+        <thead>
+            <tr>
+                <th>Class</th>
+                <th>Students</th>
+                <th>Present</th>
+                <th>Absent</th>
+                <th>Late</th>
+                <th>Not Recorded</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in today_attendance.classes %}
+            <tr>
+                <td>Grade {{ row.grade }} &middot; {{ row.section }}</td>
+                <td>{{ row.total }}</td>
+                <td>{{ row.Present }}</td>
+                <td>{{ row.Absent }}</td>
+                <td>{{ row.Late }}</td>
+                <td>{{ row.Pending }}</td>
+                <td>
+                    <a class="table-link"
+                       href="{{ url_for('attendance', grade=row.grade, section=row.section, date=today_iso) }}">
+                        {{ 'Take attendance' if row.Pending else 'View' }}
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</section>
+
+<section class="panel section-gap">
     <h3>Students by Grade</h3>
     {% for item in by_grade %}
     <div class="bar-row">
