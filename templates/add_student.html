@@ -16,17 +16,51 @@
             {% if errors.name %}<span class="error-text">{{ errors.name }}</span>{% endif %}
         </div>
 
-        <div class="form-group {{ 'has-error' if errors.course }}">
-            <label for="course">Course</label>
-            <input type="text" id="course" name="course" value="{{ form.course }}">
-            {% if errors.course %}<span class="error-text">{{ errors.course }}</span>{% endif %}
+        <div class="form-row">
+            <div class="form-group {{ 'has-error' if errors.grade }}">
+                <label for="grade">Grade</label>
+                <select id="grade" name="grade">
+                    {% for g in GRADES %}
+                    <option value="{{ g }}" {{ 'selected' if form.grade == g|string }}>Grade {{ g }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.grade %}<span class="error-text">{{ errors.grade }}</span>{% endif %}
+            </div>
+
+            <div class="form-group {{ 'has-error' if errors.section }}">
+                <label for="section">Section</label>
+                <select id="section" name="section">
+                    {% for s in SECTIONS %}
+                    <option value="{{ s }}" {{ 'selected' if form.section == s }}>Section {{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% if errors.section %}<span class="error-text">{{ errors.section }}</span>{% endif %}
+            </div>
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.gender }}">
+            <label for="gender">Gender</label>
+            <select id="gender" name="gender">
+                {% for g in GENDERS %}
+                <option value="{{ g }}" {{ 'selected' if form.gender == g }}>{{ g }}</option>
+                {% endfor %}
+            </select>
+            {% if errors.gender %}<span class="error-text">{{ errors.gender }}</span>{% endif %}
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.parent_phone }}">
+            <label for="parent_phone">Parent Phone (optional)</label>
+            <input type="text" id="parent_phone" name="parent_phone"
+                   value="{{ form.parent_phone }}" placeholder="+251911000000">
+            {% if errors.parent_phone %}<span class="error-text">{{ errors.parent_phone }}</span>{% endif %}
         </div>
 
         <div class="form-group {{ 'has-error' if errors.status }}">
             <label for="status">Status</label>
             <select id="status" name="status">
-                <option value="Active" {{ 'selected' if form.status == 'Active' }}>Active</option>
-                <option value="Inactive" {{ 'selected' if form.status == 'Inactive' }}>Inactive</option>
+                {% for s in STATUSES %}
+                <option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>
+                {% endfor %}
             </select>
             {% if errors.status %}<span class="error-text">{{ errors.status }}</span>{% endif %}
         </div>

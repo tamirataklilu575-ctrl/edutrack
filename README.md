@@ -8,15 +8,16 @@
 > Note: The demo runs on a free hosting plan. The first load may take
 > about a minute, and sample data may reset when the server restarts.
 
-EduTrack is a student management web application built with **Flask** and
+EduTrack is a high school management web application built with **Flask** and
 **SQLite**. It was created as a learning and portfolio project to practice
 full-stack web development: routing, templating, database access, form
 validation, and automated testing.
 
 ## Features
 
-- Dashboard with summary statistics (total, active, inactive, courses)
-- Student list with search by name or course
+- Dashboard with summary statistics and a students-by-grade chart
+- Student records with grade (9-12), section, gender, and parent phone
+- Student list with search by name and filter by grade
 - Add, edit, and delete students
 - Server-side form validation with clear error messages
 - Flash notifications and a custom 404 page

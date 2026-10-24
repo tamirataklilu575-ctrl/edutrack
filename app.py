@@ -1,4 +1,4 @@
-"""EduTrack - Student Management System (Phase 6: Authentication)."""
+"""EduTrack - High School Management System."""
 
 import os
 import re
@@ -25,18 +25,26 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
 DATABASE = Path(__file__).parent / "edutrack.db"
 
+# Allowed values for student fields.
+GRADES = (9, 10, 11, 12)
+SECTIONS = ("A", "B", "C", "D")
+GENDERS = ("Male", "Female")
 VALID_STATUSES = ("Active", "Inactive")
+
 MIN_LENGTH = 2
 MAX_LENGTH = 100
+PHONE_PATTERN = re.compile(r"^\+?[0-9 ]{9,15}$")
 
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,30}$")
 MIN_PASSWORD_LENGTH = 6
 
+# (name, grade, section, gender, parent_phone, status)
 SEED_STUDENTS = [
-    ("Abebe Kebede", "Computer Science", "Active"),
-    ("Selam Tadesse", "Information Systems", "Active"),
-    ("Dawit Alemu", "Software Engineering", "Inactive"),
-    ("Hana Girma", "Computer Science", "Active"),
+    ("Abebe Kebede", 9, "A", "Male", "+251911000001", "Active"),
+    ("Meron Bekele", 9, "B", "Female", "+251911000002", "Active"),
+    ("Selam Tadesse", 10, "B", "Female", "+251911000003", "Active"),
+    ("Dawit Alemu", 11, "A", "Male", "", "Inactive"),
+    ("Hana Girma", 12, "C", "Female", "+251911000005", "Active"),
 ]
 
 
@@ -50,12 +58,20 @@ def get_db():
 def init_db():
     """Create tables and add sample students on first run."""
     with get_db() as conn:
+        # Development-stage migration: replace the old university-style table.
+        columns = [row["name"] for row in conn.execute("PRAGMA table_info(students)")]
+        if columns and "grade" not in columns:
+            conn.execute("DROP TABLE students")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS students (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                course TEXT NOT NULL,
+                grade INTEGER NOT NULL,
+                section TEXT NOT NULL,
+                gender TEXT NOT NULL,
+                parent_phone TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'Active'
             )
             """
@@ -72,9 +88,22 @@ def init_db():
         count = conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
         if count == 0:
             conn.executemany(
-                "INSERT INTO students (name, course, status) VALUES (?, ?, ?)",
+                "INSERT INTO students "
+                "(name, grade, section, gender, parent_phone, status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 SEED_STUDENTS,
             )
+
+
+@app.context_processor
+def inject_options():
+    """Make the allowed field values available in every template."""
+    return {
+        "GRADES": GRADES,
+        "SECTIONS": SECTIONS,
+        "GENDERS": GENDERS,
+        "STATUSES": VALID_STATUSES,
+    }
 
 
 def login_required(view):
@@ -90,9 +119,22 @@ def login_required(view):
     return wrapped_view
 
 
-def validate_student(name, course, status):
+def read_student_form():
+    """Read and clean the student form fields from the request."""
+    return {
+        "name": request.form.get("name", "").strip(),
+        "grade": request.form.get("grade", "").strip(),
+        "section": request.form.get("section", "").strip(),
+        "gender": request.form.get("gender", "").strip(),
+        "parent_phone": request.form.get("parent_phone", "").strip(),
+        "status": request.form.get("status", "").strip(),
+    }
+
+
+def validate_student(form):
     """Return a dict of field errors. An empty dict means the data is valid."""
     errors = {}
+    name = form["name"]
 
     if not name:
         errors["name"] = "Full name is required."
@@ -101,14 +143,20 @@ def validate_student(name, course, status):
     elif len(name) > MAX_LENGTH:
         errors["name"] = f"Full name must be at most {MAX_LENGTH} characters."
 
-    if not course:
-        errors["course"] = "Course is required."
-    elif len(course) < MIN_LENGTH:
-        errors["course"] = f"Course must be at least {MIN_LENGTH} characters."
-    elif len(course) > MAX_LENGTH:
-        errors["course"] = f"Course must be at most {MAX_LENGTH} characters."
+    if form["grade"] not in [str(g) for g in GRADES]:
+        errors["grade"] = "Please choose a grade between 9 and 12."
 
-    if status not in VALID_STATUSES:
+    if form["section"] not in SECTIONS:
+        errors["section"] = "Please choose a valid section."
+
+    if form["gender"] not in GENDERS:
+        errors["gender"] = "Please choose a gender."
+
+    phone = form["parent_phone"]
+    if phone and not PHONE_PATTERN.match(phone):
+        errors["parent_phone"] = "Enter a valid phone number (9-15 digits)."
+
+    if form["status"] not in VALID_STATUSES:
         errors["status"] = "Please choose a valid status."
 
     return errors
@@ -240,39 +288,61 @@ def dashboard():
 
     total = len(all_students)
     active = sum(1 for s in all_students if s["status"] == "Active")
-    courses = len({s["course"] for s in all_students})
+    classes = len({(s["grade"], s["section"]) for s in all_students})
+
+    by_grade = []
+    for grade in GRADES:
+        count = sum(1 for s in all_students if s["grade"] == grade)
+        percent = round(count * 100 / total) if total else 0
+        by_grade.append({"grade": grade, "count": count, "percent": percent})
 
     stats = {
         "total": total,
         "active": active,
         "inactive": total - active,
-        "courses": courses,
+        "classes": classes,
     }
     return render_template(
-        "dashboard.html", stats=stats, recent_students=all_students[:5]
+        "dashboard.html",
+        stats=stats,
+        by_grade=by_grade,
+        recent_students=all_students[:5],
     )
 
 
 @app.route("/students")
 @login_required
 def student_list():
-    """Render the list of students, optionally filtered by a search query."""
+    """Render students, optionally filtered by name and/or grade."""
     query = request.args.get("q", "").strip()
+    grade_filter = request.args.get("grade", "").strip()
+
+    sql = "SELECT * FROM students"
+    conditions = []
+    params = []
+
+    if query:
+        conditions.append("name LIKE ?")
+        params.append(f"%{query}%")
+    if grade_filter in [str(g) for g in GRADES]:
+        conditions.append("grade = ?")
+        params.append(int(grade_filter))
+    else:
+        grade_filter = ""
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY grade, section, name"
 
     conn = get_db()
     try:
-        if query:
-            pattern = f"%{query}%"
-            results = conn.execute(
-                "SELECT * FROM students WHERE name LIKE ? OR course LIKE ? ORDER BY id",
-                (pattern, pattern),
-            ).fetchall()
-        else:
-            results = conn.execute("SELECT * FROM students ORDER BY id").fetchall()
+        results = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
 
-    return render_template("students.html", students=results, query=query)
+    return render_template(
+        "students.html", students=results, query=query, grade_filter=grade_filter
+    )
 
 
 @app.route("/students/add", methods=["GET", "POST"])
@@ -280,23 +350,35 @@ def student_list():
 def add_student():
     """Show the add-student form (GET) and save a new student (POST)."""
     errors = {}
-    form = {"name": "", "course": "", "status": "Active"}
+    form = {
+        "name": "",
+        "grade": "9",
+        "section": "A",
+        "gender": "Male",
+        "parent_phone": "",
+        "status": "Active",
+    }
 
     if request.method == "POST":
-        form = {
-            "name": request.form.get("name", "").strip(),
-            "course": request.form.get("course", "").strip(),
-            "status": request.form.get("status", ""),
-        }
-        errors = validate_student(form["name"], form["course"], form["status"])
+        form = read_student_form()
+        errors = validate_student(form)
 
         if not errors:
             conn = get_db()
             try:
                 with conn:
                     conn.execute(
-                        "INSERT INTO students (name, course, status) VALUES (?, ?, ?)",
-                        (form["name"], form["course"], form["status"]),
+                        "INSERT INTO students "
+                        "(name, grade, section, gender, parent_phone, status) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            form["name"],
+                            int(form["grade"]),
+                            form["section"],
+                            form["gender"],
+                            form["parent_phone"],
+                            form["status"],
+                        ),
                     )
             finally:
                 conn.close()
@@ -321,23 +403,31 @@ def edit_student(student_id):
         errors = {}
         form = {
             "name": student["name"],
-            "course": student["course"],
+            "grade": str(student["grade"]),
+            "section": student["section"],
+            "gender": student["gender"],
+            "parent_phone": student["parent_phone"],
             "status": student["status"],
         }
 
         if request.method == "POST":
-            form = {
-                "name": request.form.get("name", "").strip(),
-                "course": request.form.get("course", "").strip(),
-                "status": request.form.get("status", ""),
-            }
-            errors = validate_student(form["name"], form["course"], form["status"])
+            form = read_student_form()
+            errors = validate_student(form)
 
             if not errors:
                 with conn:
                     conn.execute(
-                        "UPDATE students SET name = ?, course = ?, status = ? WHERE id = ?",
-                        (form["name"], form["course"], form["status"], student_id),
+                        "UPDATE students SET name = ?, grade = ?, section = ?, "
+                        "gender = ?, parent_phone = ?, status = ? WHERE id = ?",
+                        (
+                            form["name"],
+                            int(form["grade"]),
+                            form["section"],
+                            form["gender"],
+                            form["parent_phone"],
+                            form["status"],
+                            student_id,
+                        ),
                     )
                 flash("Student updated successfully!", "success")
                 return redirect(url_for("student_list"))

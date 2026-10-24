@@ -6,16 +6,21 @@
 <header class="page-header page-header-row">
     <div>
         <h2>Students</h2>
-        <p>All registered students.</p>
+        <p>All registered high school students.</p>
     </div>
     <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
 </header>
 
 <form method="GET" action="{{ url_for('student_list') }}" class="search-form">
-    <input type="text" name="q" value="{{ query }}"
-           placeholder="Search by name or course...">
+    <input type="text" name="q" value="{{ query }}" placeholder="Search by name...">
+    <select name="grade">
+        <option value="">All grades</option>
+        {% for g in GRADES %}
+        <option value="{{ g }}" {{ 'selected' if grade_filter == g|string }}>Grade {{ g }}</option>
+        {% endfor %}
+    </select>
     <button type="submit" class="btn">Search</button>
-    {% if query %}
+    {% if query or grade_filter %}
     <a href="{{ url_for('student_list') }}" class="btn btn-secondary">Clear</a>
     {% endif %}
 </form>
@@ -26,7 +31,10 @@
             <tr>
                 <th>ID</th>
                 <th>Name</th>
-                <th>Course</th>
+                <th>Grade</th>
+                <th>Section</th>
+                <th>Gender</th>
+                <th>Parent Phone</th>
                 <th>Status</th>
                 <th>Actions</th>
             </tr>
@@ -36,7 +44,10 @@
             <tr>
                 <td>{{ student.id }}</td>
                 <td>{{ student.name }}</td>
-                <td>{{ student.course }}</td>
+                <td>{{ student.grade }}</td>
+                <td>{{ student.section }}</td>
+                <td>{{ student.gender }}</td>
+                <td>{{ student.parent_phone or '—' }}</td>
                 <td>
                     <span class="badge {{ 'badge-active' if student.status == 'Active' else 'badge-inactive' }}">
                         {{ student.status }}
@@ -52,7 +63,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="5">No students found.</td></tr>
+            <tr><td colspan="8">No students found.</td></tr>
             {% endfor %}
         </tbody>
     </table>

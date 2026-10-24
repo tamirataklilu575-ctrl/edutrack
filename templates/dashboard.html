@@ -5,7 +5,7 @@
 {% block content %}
 <header class="page-header">
     <h2>Dashboard</h2>
-    <p>Overview of your student records.</p>
+    <p>Overview of your high school records.</p>
 </header>
 
 <section class="stats-grid">
@@ -22,19 +22,33 @@
         <span class="card-value text-red">{{ stats.inactive }}</span>
     </div>
     <div class="card">
-        <span class="card-label">Courses</span>
-        <span class="card-value">{{ stats.courses }}</span>
+        <span class="card-label">Classes</span>
+        <span class="card-value">{{ stats.classes }}</span>
     </div>
 </section>
 
+<section class="panel section-gap">
+    <h3>Students by Grade</h3>
+    {% for item in by_grade %}
+    <div class="bar-row">
+        <span class="bar-label">Grade {{ item.grade }}</span>
+        <div class="bar-track">
+            <div class="bar-fill" style="width: {{ item.percent }}%"></div>
+        </div>
+        <span class="bar-count">{{ item.count }}</span>
+    </div>
+    {% endfor %}
+</section>
+
 <section class="panel">
-    <h3>Recent Students</h3>
+    <h3>Recently Added</h3>
     <table>
         <thead>
             <tr>
                 <th>ID</th>
                 <th>Name</th>
-                <th>Course</th>
+                <th>Grade</th>
+                <th>Section</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -43,7 +57,8 @@
             <tr>
                 <td>{{ student.id }}</td>
                 <td>{{ student.name }}</td>
-                <td>{{ student.course }}</td>
+                <td>{{ student.grade }}</td>
+                <td>{{ student.section }}</td>
                 <td>
                     <span class="badge {{ 'badge-active' if student.status == 'Active' else 'badge-inactive' }}">
                         {{ student.status }}
@@ -51,7 +66,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="4">No students found.</td></tr>
+            <tr><td colspan="5">No students found.</td></tr>
             {% endfor %}
         </tbody>
     </table>

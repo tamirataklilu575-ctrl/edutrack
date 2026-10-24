@@ -1,8 +1,17 @@
-"""Automated tests for EduTrack."""
+"""Automated tests for EduTrack (high school edition)."""
 
 import pytest
 
 import app as app_module
+
+VALID_STUDENT = {
+    "name": "Test Student",
+    "grade": "9",
+    "section": "A",
+    "gender": "Male",
+    "parent_phone": "",
+    "status": "Active",
+}
 
 
 @pytest.fixture
@@ -24,6 +33,11 @@ def auth_client(client):
     )
     client.post("/login", data={"username": "tester", "password": "secret123"})
     return client
+
+
+def student_data(**overrides):
+    """Return valid student form data with optional overrides."""
+    return {**VALID_STUDENT, **overrides}
 
 
 # ------------------------------------------------------------ Authentication
@@ -112,6 +126,12 @@ def test_dashboard_loads(auth_client):
     assert b"Dashboard" in response.data
 
 
+def test_dashboard_shows_grade_chart(auth_client):
+    response = auth_client.get("/")
+    assert b"Students by Grade" in response.data
+    assert b"Grade 12" in response.data
+
+
 def test_student_list_shows_seed_data(auth_client):
     response = auth_client.get("/students")
     assert response.status_code == 200
@@ -120,43 +140,44 @@ def test_student_list_shows_seed_data(auth_client):
 
 def test_add_student_success(auth_client):
     response = auth_client.post(
-        "/students/add",
-        data={"name": "Test Student", "course": "Biology", "status": "Active"},
-        follow_redirects=True,
+        "/students/add", data=student_data(), follow_redirects=True
     )
     assert b"Student added successfully!" in response.data
     assert b"Test Student" in response.data
 
 
 def test_add_student_empty_name_shows_error(auth_client):
-    response = auth_client.post(
-        "/students/add",
-        data={"name": "", "course": "Biology", "status": "Active"},
-    )
+    response = auth_client.post("/students/add", data=student_data(name=""))
     assert response.status_code == 200
     assert b"Full name is required." in response.data
 
 
 def test_add_student_short_name_shows_error(auth_client):
-    response = auth_client.post(
-        "/students/add",
-        data={"name": "A", "course": "Biology", "status": "Active"},
-    )
+    response = auth_client.post("/students/add", data=student_data(name="A"))
     assert b"at least 2 characters" in response.data
 
 
-def test_add_student_invalid_status_shows_error(auth_client):
+def test_add_student_invalid_grade_shows_error(auth_client):
+    response = auth_client.post("/students/add", data=student_data(grade="5"))
+    assert b"Please choose a grade between 9 and 12." in response.data
+
+
+def test_add_student_invalid_phone_shows_error(auth_client):
     response = auth_client.post(
-        "/students/add",
-        data={"name": "Test Student", "course": "Biology", "status": "Hacked"},
+        "/students/add", data=student_data(parent_phone="abc")
     )
+    assert b"Enter a valid phone number" in response.data
+
+
+def test_add_student_invalid_status_shows_error(auth_client):
+    response = auth_client.post("/students/add", data=student_data(status="Hacked"))
     assert b"Please choose a valid status." in response.data
 
 
 def test_edit_student(auth_client):
     response = auth_client.post(
         "/students/1/edit",
-        data={"name": "Abebe Updated", "course": "Math", "status": "Inactive"},
+        data=student_data(name="Abebe Updated", grade="10", status="Inactive"),
         follow_redirects=True,
     )
     assert b"Student updated successfully!" in response.data
@@ -169,8 +190,14 @@ def test_delete_student(auth_client):
     assert b"Abebe Kebede" not in response.data
 
 
-def test_search_filters_results(auth_client):
+def test_search_filters_by_name(auth_client):
     response = auth_client.get("/students?q=selam")
+    assert b"Selam Tadesse" in response.data
+    assert b"Abebe Kebede" not in response.data
+
+
+def test_grade_filter(auth_client):
+    response = auth_client.get("/students?grade=10")
     assert b"Selam Tadesse" in response.data
     assert b"Abebe Kebede" not in response.data
 
