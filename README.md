@@ -21,7 +21,7 @@ access, form validation, automated testing, and deployment.
   enter marks
 - Dashboard with summary statistics, a students-by-grade chart, and today's attendance (present, absent, late, and classes still pending)
 - Student records: grade (9-12), section, gender, and parent phone
-- Search by name and filter by grade
+- Search by name and filter by grade, with a paginated student list (20 per page)
 - Daily **attendance** per class (Present / Absent / Late)
 - **Marks** by subject and semester, with class average, highest, and lowest
 - Printable **report card** per student: marks, average, class rank, and
@@ -128,7 +128,7 @@ web service.
 - [x] Automated tests
 - [ ] Email verification and password reset
 - [x] Export reports to CSV
-- [ ] Pagination
+- [x] Pagination
 - [x] Attendance summary on the dashboard
 
 ## License

@@ -22,6 +22,7 @@ from flask import Response
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from csv_tools import build_csv
+from pagination import paginate
 
 app = Flask(__name__)
 # Read the secret key from the environment in production.
@@ -59,6 +60,9 @@ SUBJECTS = (
 TERMS = ("Semester 1", "Semester 2")
 ROLES = ("admin", "teacher")
 PASS_MARK = 50
+
+# How many students appear on one page of the student list.
+STUDENTS_PER_PAGE = 20
 
 MIN_LENGTH = 2
 MAX_LENGTH = 100
@@ -763,11 +767,12 @@ def dashboard():
 @app.route("/students")
 @login_required
 def student_list():
-    """Render students, optionally filtered by name and/or grade."""
+    """Render one page of students, filtered by name and/or grade."""
     query = request.args.get("q", "").strip()
     grade_filter = request.args.get("grade", "").strip()
+    # A missing or non-numeric page number falls back to page 1.
+    requested_page = request.args.get("page", 1, type=int)
 
-    sql = "SELECT * FROM students"
     conditions = []
     params = []
 
@@ -781,18 +786,31 @@ def student_list():
     else:
         grade_filter = ""
 
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
-    sql += " ORDER BY grade, section, name"
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
 
     conn = get_db()
     try:
-        results = conn.execute(sql, params).fetchall()
+        total = conn.execute(
+            "SELECT COUNT(*) AS total FROM students" + where, params
+        ).fetchone()["total"]
+        pager = paginate(total, requested_page, STUDENTS_PER_PAGE)
+
+        # "id" breaks ties so students never repeat or vanish between pages.
+        results = conn.execute(
+            "SELECT * FROM students"
+            + where
+            + " ORDER BY grade, section, name, id LIMIT ? OFFSET ?",
+            [*params, STUDENTS_PER_PAGE, pager["offset"]],
+        ).fetchall()
     finally:
         conn.close()
 
     return render_template(
-        "students.html", students=results, query=query, grade_filter=grade_filter
+        "students.html",
+        students=results,
+        query=query,
+        grade_filter=grade_filter,
+        pager=pager,
     )
 
 

@@ -78,4 +78,40 @@
         </tbody>
     </table>
 </section>
+
+{% if pager.pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+    <span class="pagination-info">
+        Showing {{ pager.first }}&ndash;{{ pager.last }} of {{ pager.total }} students
+    </span>
+
+    <div class="pagination-links">
+        {% if pager.has_prev %}
+        <a href="{{ url_for('student_list', q=query or none, grade=grade_filter or none, page=pager.page - 1) }}">&laquo; Prev</a>
+        {% else %}
+        <span class="disabled">&laquo; Prev</span>
+        {% endif %}
+
+        {% for n in pager.window %}
+            {% if n is none %}
+            <span class="gap">&hellip;</span>
+            {% elif n == pager.page %}
+            <span class="current" aria-current="page">{{ n }}</span>
+            {% else %}
+            <a href="{{ url_for('student_list', q=query or none, grade=grade_filter or none, page=n) }}">{{ n }}</a>
+            {% endif %}
+        {% endfor %}
+
+        {% if pager.has_next %}
+        <a href="{{ url_for('student_list', q=query or none, grade=grade_filter or none, page=pager.page + 1) }}">Next &raquo;</a>
+        {% else %}
+        <span class="disabled">Next &raquo;</span>
+        {% endif %}
+    </div>
+</nav>
+{% elif pager.total %}
+<p class="pagination-info single-page">
+    {{ pager.total }} student{{ '' if pager.total == 1 else 's' }}
+</p>
+{% endif %}
 {% endblock %}
