@@ -11,7 +11,10 @@
         <p>All registered high school students.</p>
     </div>
     {% if is_admin %}
-    <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
+    <div class="header-actions">
+        <a href="{{ url_for('students_export', q=query, grade=grade_filter) }}" class="btn btn-outline">Export CSV</a>
+        <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
+    </div>
     {% endif %}
 </header>
 

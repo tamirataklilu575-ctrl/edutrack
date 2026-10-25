@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Export{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Export Data</h2>
+    <p>Download your records as CSV files. They open in Excel and Google Sheets, and they make a useful backup.</p>
+</header>
+
+<section class="panel">
+    <table>
+        <thead>
+            <tr>
+                <th>File</th>
+                <th>What is inside</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Students</strong></td>
+                <td>Every student: name, grade, section, gender, parent phone, and status.</td>
+                <td><a href="{{ url_for('students_export') }}" class="btn btn-small">Download</a></td>
+            </tr>
+            <tr>
+                <td><strong>Marks</strong></td>
+                <td>Every score by student, semester, and subject.</td>
+                <td><a href="{{ url_for('marks_export') }}" class="btn btn-small">Download</a></td>
+            </tr>
+            <tr>
+                <td><strong>Attendance</strong></td>
+                <td>Every attendance record by student and date.</td>
+                <td><a href="{{ url_for('attendance_export') }}" class="btn btn-small">Download</a></td>
+            </tr>
+            <tr>
+                <td><strong>Class Report</strong></td>
+                <td>Ranks, averages, and subject statistics for one class.</td>
+                <td><a href="{{ url_for('class_report') }}" class="btn btn-small btn-outline">Open Class Report</a></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="muted-note export-note">
+        These files contain personal information about students. Store them
+        securely, share them only with people who need them, and delete copies
+        you no longer need.
+    </p>
+</section>
+{% endblock %}

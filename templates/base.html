@@ -24,6 +24,8 @@
             {% if current_user.role == 'admin' %}
             <a href="{{ url_for('user_list') }}"
                class="nav-link {{ 'active' if request.endpoint == 'user_list' }}">Users</a>
+            <a href="{{ url_for('export_page') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'export_page' }}">Export</a>
             {% endif %}
         </nav>
 

@@ -18,7 +18,10 @@ from flask import (
     session,
     url_for,
 )
+from flask import Response
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from csv_tools import build_csv
 
 app = Flask(__name__)
 # Read the secret key from the environment in production.
@@ -1234,7 +1237,211 @@ def marks():
 
 
 init_db()
+# -------------------------------------------------------------- Export routes
 
+
+def csv_response(filename, headers, rows):
+    """Return a CSV file as a download."""
+    response = Response(build_csv(headers, rows), mimetype="text/csv")
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def read_class_filters():
+    """Read and validate the grade, section, and term from the URL."""
+    grade = request.args.get("grade", "9")
+    if grade not in [str(g) for g in GRADES]:
+        grade = "9"
+
+    section = request.args.get("section", "A")
+    if section not in SECTIONS:
+        section = "A"
+
+    term = request.args.get("term", TERMS[0])
+    if term not in TERMS:
+        term = TERMS[0]
+
+    return grade, section, term
+
+
+@app.route("/export")
+@admin_required
+def export_page():
+    """List the available CSV downloads."""
+    return render_template("export.html")
+
+
+@app.route("/students/export.csv")
+@admin_required
+def students_export():
+    """Download the student list (respecting the search and grade filters)."""
+    query = request.args.get("q", "").strip()
+    grade_filter = request.args.get("grade", "").strip()
+
+    sql = "SELECT * FROM students"
+    conditions = []
+    params = []
+
+    if query:
+        conditions.append("LOWER(name) LIKE LOWER(?)")
+        params.append(f"%{query}%")
+    if grade_filter in [str(g) for g in GRADES]:
+        conditions.append("grade = ?")
+        params.append(int(grade_filter))
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY grade, section, name"
+
+    conn = get_db()
+    try:
+        students = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+
+    rows = [
+        [
+            s["id"],
+            s["name"],
+            s["grade"],
+            s["section"],
+            s["gender"],
+            s["parent_phone"],
+            s["status"],
+        ]
+        for s in students
+    ]
+    return csv_response(
+        f"students_{today_local().isoformat()}.csv",
+        ["ID", "Name", "Grade", "Section", "Gender", "Parent Phone", "Status"],
+        rows,
+    )
+
+
+@app.route("/class-report/export.csv")
+@login_required
+def class_report_export():
+    """Download the class report for one grade, section, and term."""
+    grade, section, term = read_class_filters()
+
+    conn = get_db()
+    try:
+        class_students = conn.execute(
+            "SELECT * FROM students "
+            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
+            (int(grade), section),
+        ).fetchall()
+
+        mark_rows = conn.execute(
+            "SELECT m.student_id AS student_id, m.subject AS subject, "
+            "m.score AS score "
+            "FROM marks m JOIN students s ON s.id = m.student_id "
+            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
+            "AND m.term = ?",
+            (int(grade), section, term),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    report_rows, subject_stats, _summary = build_class_report(
+        class_students, mark_rows
+    )
+
+    headers = ["Rank", "Name", *SUBJECTS, "Total", "Average", "Remark", "Result"]
+
+    def blank_if_missing(text):
+        return "" if text == "—" else text
+
+    data = []
+    for row in report_rows:
+        data.append(
+            [
+                "" if row["rank"] is None else row["rank"],
+                row["student"]["name"],
+                *[blank_if_missing(cell["text"]) for cell in row["cells"]],
+                blank_if_missing(row["total_text"]),
+                blank_if_missing(row["average_text"]),
+                row["remark"],
+                row["result"],
+            ]
+        )
+
+    # Subject statistics go at the bottom, like on the page.
+    for label, key in (
+        ("Subject Average", "average"),
+        ("Highest", "highest"),
+        ("Lowest", "lowest"),
+        ("Pass Rate", "pass_rate"),
+    ):
+        values = [blank_if_missing(stat[key]) for stat in subject_stats]
+        data.append(["", label, *values, "", "", "", ""])
+
+    safe_term = term.replace(" ", "-")
+    return csv_response(
+        f"class_report_grade{grade}_{section}_{safe_term}.csv", headers, data
+    )
+
+
+@app.route("/export/marks.csv")
+@admin_required
+def marks_export():
+    """Download every mark (a backup of all scores)."""
+    conn = get_db()
+    try:
+        mark_rows = conn.execute(
+            "SELECT s.id AS student_id, s.name AS name, s.grade AS grade, "
+            "s.section AS section, m.term AS term, m.subject AS subject, "
+            "m.score AS score "
+            "FROM marks m JOIN students s ON s.id = m.student_id "
+            "ORDER BY s.grade, s.section, s.name, m.term, m.subject"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    rows = [
+        [
+            r["student_id"],
+            r["name"],
+            r["grade"],
+            r["section"],
+            r["term"],
+            r["subject"],
+            f"{r['score']:g}",
+        ]
+        for r in mark_rows
+    ]
+    return csv_response(
+        f"marks_{today_local().isoformat()}.csv",
+        ["Student ID", "Name", "Grade", "Section", "Term", "Subject", "Score"],
+        rows,
+    )
+
+
+@app.route("/export/attendance.csv")
+@admin_required
+def attendance_export():
+    """Download every attendance record (a backup of all attendance)."""
+    conn = get_db()
+    try:
+        attendance_rows = conn.execute(
+            "SELECT s.id AS student_id, s.name AS name, s.grade AS grade, "
+            "s.section AS section, a.date AS day, a.status AS status "
+            "FROM attendance a JOIN students s ON s.id = a.student_id "
+            "ORDER BY a.date, s.grade, s.section, s.name"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    rows = [
+        [r["student_id"], r["name"], r["grade"], r["section"], r["day"], r["status"]]
+        for r in attendance_rows
+    ]
+    return csv_response(
+        f"attendance_{today_local().isoformat()}.csv",
+        ["Student ID", "Name", "Grade", "Section", "Date", "Status"],
+        rows,
+    )
 if __name__ == "__main__":
     # Debug mode is only enabled when FLASK_DEBUG=1 is set (local development).
     app.run(debug=os.environ.get("FLASK_DEBUG") == "1")

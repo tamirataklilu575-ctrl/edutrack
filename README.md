@@ -29,6 +29,7 @@ access, form validation, automated testing, and deployment.
 - **Class report**: every student's scores, total, average, rank, and result,
   plus per-subject statistics
 - Server-side form validation, flash messages, and a custom 404 page
+- **CSV export** for students, class reports, marks, and attendance (Excel-friendly, with spreadsheet-formula protection)
 - Automated tests with pytest
 
 ## Tech Stack
@@ -126,7 +127,7 @@ web service.
 - [x] Persistent PostgreSQL storage
 - [x] Automated tests
 - [ ] Email verification and password reset
-- [ ] Export reports to CSV
+- [x] Export reports to CSV
 - [ ] Pagination
 - [x] Attendance summary on the dashboard
 

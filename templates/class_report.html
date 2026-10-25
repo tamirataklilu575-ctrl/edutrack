@@ -8,7 +8,10 @@
         <h2>Class Report</h2>
         <p>Scores, averages, and ranks for a whole class.</p>
     </div>
-    <button type="button" class="btn" onclick="window.print()">Print</button>
+    <div class="header-actions">
+        <a href="{{ url_for('class_report_export', grade=grade, section=section, term=term) }}" class="btn btn-outline">Export CSV</a>
+        <button type="button" class="btn" onclick="window.print()">Print</button>
+    </div>
 </header>
 
 <form method="GET" action="{{ url_for('class_report') }}"
