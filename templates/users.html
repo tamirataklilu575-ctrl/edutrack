@@ -5,8 +5,19 @@
 {% block content %}
 <header class="page-header">
     <h2>Users</h2>
-    <p>Admins manage students and users. Teachers take attendance and enter marks.</p>
+    <p>People who can sign in to {{ current_user.school_name }}. Admins manage students and users; teachers take attendance and enter marks.</p>
 </header>
+
+<section class="panel section-gap">
+    <h3>Add a Teacher</h3>
+    <p class="muted-note">Choose a first password and share it with the teacher. They can change it under Account.</p>
+    <form method="POST" action="{{ url_for('add_user') }}" class="search-form filter-wrap">
+        <input type="email" name="email" placeholder="teacher@example.com" required>
+        <input type="password" name="password" placeholder="First password (6+ characters)"
+               autocomplete="new-password" required>
+        <button type="submit" class="btn">Add Teacher</button>
+    </form>
+</section>
 
 <section class="panel">
     <table>

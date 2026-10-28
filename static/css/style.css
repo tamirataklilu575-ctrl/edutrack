@@ -755,3 +755,10 @@ th {
         display: none;
     }
 }
+/* School name in the sidebar */
+.school-name {
+    margin: -20px 0 24px;
+    color: #9ca3af;
+    font-size: 0.85rem;
+    word-break: break-word;
+}

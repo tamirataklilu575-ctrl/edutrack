@@ -10,6 +10,7 @@
     {% if current_user %}
     <aside class="sidebar">
         <h1 class="logo">🎓 EduTrack</h1>
+        <p class="school-name">{{ current_user.school_name }}</p>
         <nav>
             <a href="{{ url_for('dashboard') }}"
                class="nav-link {{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
@@ -34,6 +35,8 @@
                 👤 {{ current_user.email }}
                 <small class="role-tag">{{ current_user.role }}</small>
             </span>
+            <a href="{{ url_for('account') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'account' }}">Account</a>
             <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
                 <button type="submit" class="nav-link">Log out</button>
             </form>

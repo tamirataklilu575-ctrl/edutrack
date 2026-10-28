@@ -2,89 +2,22 @@
 
 import sqlite3
 
-import pytest
-
 import app as app_module
+from helpers import (
+    add_teacher,
+    attendance_data,
+    login,
+    marks_data,
+    register,
+    student_data,
+)
 
 TEST_EMAIL = "tester@example.com"
 
-VALID_STUDENT = {
-    "name": "Test Student",
-    "grade": "9",
-    "section": "A",
-    "gender": "Male",
-    "parent_phone": "",
-    "status": "Active",
-}
-
-
-# ------------------------------------------------------------------- Helpers
-
-
-def register(client, email, password="secret123"):
-    """Register an account through the form."""
-    return client.post(
-        "/register",
-        data={"email": email, "password": password, "confirm": password},
-    )
-
-
-def login(client, email, password="secret123"):
-    """Log in through the form."""
-    return client.post("/login", data={"email": email, "password": password})
-
-
-def student_data(**overrides):
-    """Return valid student form data with optional overrides."""
-    return {**VALID_STUDENT, **overrides}
-
-
-def marks_data(**overrides):
-    """Return valid marks form data for Grade 9 Section A (student 1)."""
-    data = {
-        "grade": "9",
-        "section": "A",
-        "subject": "Mathematics",
-        "term": "Semester 1",
-        "score_1": "85",
-    }
-    data.update(overrides)
-    return data
-
 
 def add_second_student(client):
-    """Add a second Grade 9 Section A student (it gets ID 6)."""
+    """Add a second Grade 9 Section A student (it gets ID 6 in a one-school app)."""
     client.post("/students/add", data=student_data(name="Second Student"))
-
-
-# ------------------------------------------------------------------ Fixtures
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    """Create a test client that uses a temporary database."""
-    monkeypatch.setattr(app_module, "DATABASE", tmp_path / "test.db")
-    app_module.init_db()
-    app_module.app.config["TESTING"] = True
-    with app_module.app.test_client() as test_client:
-        yield test_client
-
-
-@pytest.fixture
-def auth_client(client):
-    """A test client that is registered (as the admin) and logged in."""
-    register(client, TEST_EMAIL)
-    login(client, TEST_EMAIL)
-    return client
-
-
-@pytest.fixture
-def teacher_client(client):
-    """A client logged in as a teacher (the first account, 'boss', is the admin)."""
-    register(client, "boss@example.com")
-    register(client, "teacher1@example.com")
-    login(client, "teacher1@example.com")
-    return client
 
 
 # ------------------------------------------------------------ Authentication
@@ -106,19 +39,21 @@ def test_register_success(client):
     response = client.post(
         "/register",
         data={
+            "school_name": "Green Valley High",
             "email": "newuser@example.com",
             "password": "secret123",
             "confirm": "secret123",
         },
         follow_redirects=True,
     )
-    assert b"Account created!" in response.data
+    assert b"School created!" in response.data
 
 
 def test_register_password_mismatch(client):
     response = client.post(
         "/register",
         data={
+            "school_name": "Green Valley High",
             "email": "newuser@example.com",
             "password": "secret123",
             "confirm": "different",
@@ -130,7 +65,12 @@ def test_register_password_mismatch(client):
 def test_register_short_password(client):
     response = client.post(
         "/register",
-        data={"email": "newuser@example.com", "password": "123", "confirm": "123"},
+        data={
+            "school_name": "Green Valley High",
+            "email": "newuser@example.com",
+            "password": "123",
+            "confirm": "123",
+        },
     )
     assert b"at least 6 characters" in response.data
 
@@ -138,7 +78,12 @@ def test_register_short_password(client):
 def test_register_invalid_email(client):
     response = client.post(
         "/register",
-        data={"email": "not-an-email", "password": "secret123", "confirm": "secret123"},
+        data={
+            "school_name": "Green Valley High",
+            "email": "not-an-email",
+            "password": "secret123",
+            "confirm": "secret123",
+        },
     )
     assert b"Enter a valid email address." in response.data
 
@@ -232,7 +177,7 @@ def test_dashboard_shows_grade_chart(auth_client):
     assert b"Grade 12" in response.data
 
 
-def test_student_list_shows_seed_data(auth_client):
+def test_student_list_shows_sample_data(auth_client):
     response = auth_client.get("/students")
     assert response.status_code == 200
     assert b"Abebe Kebede" in response.data
@@ -330,14 +275,7 @@ def test_attendance_page_lists_class_students(auth_client):
 
 def test_attendance_save_and_summary(auth_client):
     response = auth_client.post(
-        "/attendance",
-        data={
-            "grade": "9",
-            "section": "A",
-            "date": "2026-10-20",
-            "status_1": "Absent",
-        },
-        follow_redirects=True,
+        "/attendance", data=attendance_data("Absent"), follow_redirects=True
     )
     assert b"Attendance saved." in response.data
     assert b"Absent: 1" in response.data
@@ -349,10 +287,7 @@ def test_attendance_invalid_date_falls_back_to_today(auth_client):
 
 
 def test_delete_student_with_attendance(auth_client):
-    auth_client.post(
-        "/attendance",
-        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Late"},
-    )
+    auth_client.post("/attendance", data=attendance_data("Late"))
     response = auth_client.post("/students/1/delete", follow_redirects=True)
     assert b"Student deleted." in response.data
 
@@ -411,7 +346,7 @@ def test_delete_student_with_marks(auth_client):
 # --------------------------------------------------------------------- Roles
 
 
-def test_first_user_is_admin(auth_client):
+def test_registering_makes_you_admin_of_your_own_school(auth_client):
     response = auth_client.get("/users")
     assert response.status_code == 200
     assert b"Admin" in response.data
@@ -446,14 +381,7 @@ def test_teacher_sees_students_without_admin_buttons(teacher_client):
 
 def test_teacher_can_take_attendance(teacher_client):
     response = teacher_client.post(
-        "/attendance",
-        data={
-            "grade": "9",
-            "section": "A",
-            "date": "2026-10-20",
-            "status_1": "Present",
-        },
-        follow_redirects=True,
+        "/attendance", data=attendance_data("Present"), follow_redirects=True
     )
     assert b"Attendance saved." in response.data
 
@@ -463,11 +391,9 @@ def test_teacher_can_enter_marks(teacher_client):
     assert b"Marks saved." in response.data
 
 
-def test_admin_can_change_role(client):
-    register(client, "boss@example.com")
-    register(client, "second@example.com")
-    login(client, "boss@example.com")
-    response = client.post(
+def test_admin_can_change_role_of_a_teacher(auth_client):
+    add_teacher(auth_client, "second@example.com")
+    response = auth_client.post(
         "/users/2/role", data={"role": "admin"}, follow_redirects=True
     )
     assert b"Role updated." in response.data
@@ -480,11 +406,9 @@ def test_admin_cannot_change_own_role(auth_client):
     assert b"cannot change your own role" in response.data
 
 
-def test_invalid_role_is_rejected(client):
-    register(client, "boss@example.com")
-    register(client, "second@example.com")
-    login(client, "boss@example.com")
-    response = client.post(
+def test_invalid_role_is_rejected(auth_client):
+    add_teacher(auth_client, "second@example.com")
+    response = auth_client.post(
         "/users/2/role", data={"role": "superuser"}, follow_redirects=True
     )
     assert b"Invalid role." in response.data
@@ -535,19 +459,13 @@ def test_report_card_without_marks(auth_client):
 
 
 def test_report_card_attendance_rate(auth_client):
-    auth_client.post(
-        "/attendance",
-        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Present"},
-    )
+    auth_client.post("/attendance", data=attendance_data("Present"))
     response = auth_client.get("/students/1/report")
     assert b"100%" in response.data
 
 
 def test_report_card_all_absent_gives_zero_rate(auth_client):
-    auth_client.post(
-        "/attendance",
-        data={"grade": "9", "section": "A", "date": "2026-10-20", "status_1": "Absent"},
-    )
+    auth_client.post("/attendance", data=attendance_data("Absent"))
     response = auth_client.get("/students/1/report")
     assert b"0%" in response.data
     assert b"100%" not in response.data

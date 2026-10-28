@@ -1,11 +1,14 @@
-"""Fill the database with FAKE demo data (for screenshots and demos).
+"""Fill the database with a FAKE demo school (for screenshots and demos).
 
 Run it from the project folder:
 
     python scripts/seed_demo.py
 
-It adds about 30 students, one semester of marks, and recent attendance.
-Running it twice is safe: it does nothing if the demo data already exists.
+It creates a school called "Demo School" with an admin account, about 30
+students, one semester of marks, and recent attendance. Running it twice is
+safe: it does nothing if the demo school already exists.
+
+Demo login:  admin@example.com  /  demo123
 """
 
 import random
@@ -17,9 +20,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import app as app_module  # noqa: E402
+from werkzeug.security import generate_password_hash  # noqa: E402
 
-# Demo students get phone numbers with this prefix, which marks them as demo data.
-DEMO_PHONE_PREFIX = "+251922"
+DEMO_SCHOOL_NAME = "Demo School"
+DEMO_EMAIL = "admin@example.com"
+DEMO_PASSWORD = "demo123"
 
 MALE_NAMES = [
     "Abel", "Biruk", "Dagim", "Eyob", "Fikadu",
@@ -63,7 +68,7 @@ def make_students():
                 first = FEMALE_NAMES[(index // 2) % len(FEMALE_NAMES)]
 
             father = FATHER_NAMES[(index * 3 + 1) % len(FATHER_NAMES)]
-            phone = f"{DEMO_PHONE_PREFIX}{100000 + index}"
+            phone = f"+251922{100000 + index}"
             # A couple of inactive students make the dashboard more realistic.
             status = "Inactive" if index % 13 == 12 else "Active"
 
@@ -76,10 +81,10 @@ def make_students():
 
 
 def seed_demo_data(today=None):
-    """Add demo students, marks, and attendance.
+    """Create the demo school, its admin, students, marks, and attendance.
 
-    Returns a dict of how many rows were added, or None if the demo data is
-    already there.
+    Returns a dict of how many rows were added, or None if the demo school
+    already exists.
     """
     today = today or app_module.today_local()
     rng = random.Random(2026)  # A fixed seed gives the same data every time.
@@ -88,23 +93,35 @@ def seed_demo_data(today=None):
     conn = app_module.get_db()
     try:
         with conn:
-            already = conn.execute(
-                "SELECT COUNT(*) AS total FROM students WHERE parent_phone LIKE ?",
-                (f"{DEMO_PHONE_PREFIX}%",),
+            exists = conn.execute(
+                "SELECT COUNT(*) AS total FROM schools WHERE name = ?",
+                (DEMO_SCHOOL_NAME,),
             ).fetchone()["total"]
-            if already:
+            taken = conn.execute(
+                "SELECT COUNT(*) AS total FROM users WHERE email = ?",
+                (DEMO_EMAIL,),
+            ).fetchone()["total"]
+            if exists or taken:
                 return None
+
+            school_id = app_module.create_school(conn, DEMO_SCHOOL_NAME)
+            conn.execute(
+                "INSERT INTO users (email, password_hash, role, school_id) "
+                "VALUES (?, ?, 'admin', ?)",
+                (DEMO_EMAIL, generate_password_hash(DEMO_PASSWORD), school_id),
+            )
 
             conn.executemany(
                 "INSERT INTO students "
-                "(name, grade, section, gender, parent_phone, status) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                students,
+                "(school_id, name, grade, section, gender, parent_phone, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(school_id, *student) for student in students],
             )
 
             active = conn.execute(
                 "SELECT id, grade, section FROM students "
-                "WHERE status = 'Active' ORDER BY id"
+                "WHERE school_id = ? AND status = 'Active' ORDER BY id",
+                (school_id,),
             ).fetchall()
 
             # Each student has an "ability", so their scores are believable.
@@ -166,13 +183,14 @@ def main(argv):
 
     result = seed_demo_data()
     if result is None:
-        print("Demo data is already in the database. Nothing to do.")
+        print("The demo school (or its admin email) already exists. Nothing to do.")
         return 0
 
     print(
-        f"Added {result['students']} demo students, {result['marks']} marks, "
-        f"and {result['attendance']} attendance records."
+        f"Created '{DEMO_SCHOOL_NAME}' with {result['students']} students, "
+        f"{result['marks']} marks, and {result['attendance']} attendance records."
     )
+    print(f"Log in with {DEMO_EMAIL} / {DEMO_PASSWORD}")
     return 0
 
 

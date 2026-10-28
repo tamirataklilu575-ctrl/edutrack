@@ -9,20 +9,6 @@ from pagination import page_window, paginate
 
 
 @pytest.fixture
-def admin_client(tmp_path, monkeypatch):
-    """A logged-in admin client with a fresh database (5 sample students)."""
-    monkeypatch.setattr(app_module, "DATABASE", tmp_path / "pagination.db")
-    app_module.init_db()
-    app_module.app.config["TESTING"] = True
-
-    with app_module.app.test_client() as client:
-        credentials = {"email": "boss@example.com", "password": "secret123"}
-        client.post("/register", data={**credentials, "confirm": "secret123"})
-        client.post("/login", data=credentials)
-        yield client
-
-
-@pytest.fixture
 def two_per_page(monkeypatch):
     """Show only 2 students per page so 5 students make 3 pages."""
     monkeypatch.setattr(app_module, "STUDENTS_PER_PAGE", 2)
@@ -96,84 +82,90 @@ def test_page_window_fills_a_one_page_gap():
 # ------------------------------------------------------------ student list
 
 
-def test_first_page_shows_first_students(admin_client, two_per_page):
-    response = admin_client.get("/students")
+def test_first_page_shows_first_students(auth_client, two_per_page):
+    response = auth_client.get("/students")
     assert b"Abebe Kebede" in response.data
     assert b"Meron Bekele" in response.data
     assert b"Selam Tadesse" not in response.data
     assert b"of 5 students" in response.data
 
 
-def test_second_page_shows_next_students(admin_client, two_per_page):
-    response = admin_client.get("/students?page=2")
+def test_second_page_shows_next_students(auth_client, two_per_page):
+    response = auth_client.get("/students?page=2")
     assert b"Selam Tadesse" in response.data
     assert b"Dawit Alemu" in response.data
     assert b"Abebe Kebede" not in response.data
     assert b"Hana Girma" not in response.data
 
 
-def test_last_page_shows_remaining_student(admin_client, two_per_page):
-    response = admin_client.get("/students?page=3")
+def test_last_page_shows_remaining_student(auth_client, two_per_page):
+    response = auth_client.get("/students?page=3")
     assert b"Hana Girma" in response.data
     assert b"Dawit Alemu" not in response.data
 
 
-def test_page_number_too_high_shows_last_page(admin_client, two_per_page):
-    response = admin_client.get("/students?page=99")
+def test_page_number_too_high_shows_last_page(auth_client, two_per_page):
+    response = auth_client.get("/students?page=99")
     assert response.status_code == 200
     assert b"Hana Girma" in response.data
 
 
 @pytest.mark.parametrize("bad_page", ["abc", "0", "-3", ""])
-def test_bad_page_number_shows_first_page(admin_client, two_per_page, bad_page):
-    response = admin_client.get(f"/students?page={bad_page}")
+def test_bad_page_number_shows_first_page(auth_client, two_per_page, bad_page):
+    response = auth_client.get(f"/students?page={bad_page}")
     assert response.status_code == 200
     assert b"Abebe Kebede" in response.data
 
 
-def test_filter_is_kept_in_page_links(admin_client, monkeypatch):
+def test_filter_is_kept_in_page_links(auth_client, monkeypatch):
     monkeypatch.setattr(app_module, "STUDENTS_PER_PAGE", 1)
 
-    response = admin_client.get("/students?grade=9")
+    response = auth_client.get("/students?grade=9")
 
     link = re.search(rb'href="([^"]*page=2[^"]*)"', response.data)
     assert link is not None
     assert b"grade=9" in link.group(1)
 
 
-def test_filtered_second_page(admin_client, monkeypatch):
+def test_filtered_second_page(auth_client, monkeypatch):
     monkeypatch.setattr(app_module, "STUDENTS_PER_PAGE", 1)
 
-    response = admin_client.get("/students?grade=9&page=2")
+    response = auth_client.get("/students?grade=9&page=2")
 
     assert b"Meron Bekele" in response.data
     assert b"Abebe Kebede" not in response.data
     assert b"Selam Tadesse" not in response.data
 
 
-def test_single_page_has_no_page_links(admin_client, monkeypatch):
+def test_single_page_has_no_page_links(auth_client, monkeypatch):
     monkeypatch.setattr(app_module, "STUDENTS_PER_PAGE", 20)
 
-    response = admin_client.get("/students")
+    response = auth_client.get("/students")
 
     assert b'<nav class="pagination"' not in response.data
     assert b"5 students" in response.data
 
 
-def test_search_with_one_result_has_no_page_links(admin_client, two_per_page):
-    response = admin_client.get("/students?q=selam")
+def test_search_with_one_result_has_no_page_links(auth_client, two_per_page):
+    response = auth_client.get("/students?q=selam")
 
     assert b"Selam Tadesse" in response.data
     assert b"Abebe Kebede" not in response.data
     assert b'<nav class="pagination"' not in response.data
 
 
-def test_csv_export_includes_every_page(admin_client, two_per_page):
-    response = admin_client.get("/students/export.csv")
+def test_csv_export_includes_every_page(auth_client, two_per_page):
+    response = auth_client.get("/students/export.csv")
     text = response.data.decode("utf-8-sig")
 
     assert "Abebe Kebede" in text
     assert "Hana Girma" in text
+
+
+def test_pagination_stays_inside_your_school(two_schools, two_per_page):
+    alice, bob = two_schools
+    # Bob has his own 5 students, so he sees 5 (not 10) in total.
+    assert b"of 5 students" in bob.get("/students").data
 
 
 def test_default_page_size_is_reasonable():

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Account{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Account</h2>
+    <p>Signed in as {{ current_user.email }} ({{ current_user.role }}) at {{ current_user.school_name }}.</p>
+</header>
+
+<section class="panel form-panel">
+    <h3>Change Password</h3>
+    <form method="POST" novalidate>
+        <div class="form-group {{ 'has-error' if errors.current_password }}">
+            <label for="current_password">Current Password</label>
+            <input type="password" id="current_password" name="current_password"
+                   autocomplete="current-password">
+            {% if errors.current_password %}<span class="error-text">{{ errors.current_password }}</span>{% endif %}
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.new_password }}">
+            <label for="new_password">New Password</label>
+            <input type="password" id="new_password" name="new_password"
+                   autocomplete="new-password">
+            {% if errors.new_password %}<span class="error-text">{{ errors.new_password }}</span>{% endif %}
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.confirm }}">
+            <label for="confirm">Confirm New Password</label>
+            <input type="password" id="confirm" name="confirm"
+                   autocomplete="new-password">
+            {% if errors.confirm %}<span class="error-text">{{ errors.confirm }}</span>{% endif %}
+        </div>
+
+        <button type="submit" class="btn">Change Password</button>
+    </form>
+</section>
+{% endblock %}

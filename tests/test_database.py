@@ -29,10 +29,7 @@ def test_using_postgres_follows_database_url(monkeypatch):
     assert app_module.using_postgres() is False
 
 
-def test_connection_commits_on_success_and_rolls_back_on_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(app_module, "DATABASE", tmp_path / "wrapper.db")
-    app_module.init_db()
-
+def test_connection_commits_on_success_and_rolls_back_on_error(db_path):
     insert = "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)"
     conn = app_module.get_db()
 
@@ -48,3 +45,15 @@ def test_connection_commits_on_success_and_rolls_back_on_error(tmp_path, monkeyp
     conn.close()
 
     assert emails == ["keep@example.com"]
+
+
+def test_create_school_returns_the_new_id(db_path):
+    conn = app_module.get_db()
+    try:
+        with conn:
+            first = app_module.create_school(conn, "One")
+            second = app_module.create_school(conn, "Two")
+    finally:
+        conn.close()
+
+    assert (first, second) == (1, 2)

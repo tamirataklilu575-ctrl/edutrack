@@ -6,15 +6,22 @@
 <div class="auth-wrapper">
     <section class="panel form-panel">
         <header class="page-header">
-            <h2>Create Account</h2>
-            <p>Register with your email to start using EduTrack.</p>
+            <h2>Register Your School</h2>
+            <p>Create a school and its administrator account. Your school's data stays private to your school.</p>
         </header>
 
         <form method="POST" novalidate>
+            <div class="form-group {{ 'has-error' if errors.school_name }}">
+                <label for="school_name">School Name</label>
+                <input type="text" id="school_name" name="school_name"
+                       value="{{ form.school_name }}" autofocus>
+                {% if errors.school_name %}<span class="error-text">{{ errors.school_name }}</span>{% endif %}
+            </div>
+
             <div class="form-group {{ 'has-error' if errors.email }}">
-                <label for="email">Email</label>
+                <label for="email">Admin Email</label>
                 <input type="email" id="email" name="email"
-                       value="{{ form.email }}" autocomplete="email" autofocus>
+                       value="{{ form.email }}" autocomplete="email">
                 {% if errors.email %}<span class="error-text">{{ errors.email }}</span>{% endif %}
             </div>
 
@@ -32,7 +39,7 @@
                 {% if errors.confirm %}<span class="error-text">{{ errors.confirm }}</span>{% endif %}
             </div>
 
-            <button type="submit" class="btn">Register</button>
+            <button type="submit" class="btn">Create School</button>
         </form>
 
         <p class="auth-switch">

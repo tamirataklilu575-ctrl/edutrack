@@ -9,6 +9,7 @@ from pathlib import Path
 
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     g,
@@ -18,7 +19,6 @@ from flask import (
     session,
     url_for,
 )
-from flask import Response
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from csv_tools import build_csv
@@ -72,8 +72,11 @@ EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MAX_EMAIL_LENGTH = 254
 MIN_PASSWORD_LENGTH = 6
 
+# Name given to the school that adopts data created before schools existed.
+LEGACY_SCHOOL_NAME = "My School"
+
 # (name, grade, section, gender, parent_phone, status)
-SEED_STUDENTS = [
+SAMPLE_STUDENTS = [
     ("Abebe Kebede", 9, "A", "Male", "+251911000001", "Active"),
     ("Meron Bekele", 9, "B", "Female", "+251911000002", "Active"),
     ("Selam Tadesse", 10, "B", "Female", "+251911000003", "Active"),
@@ -162,26 +165,51 @@ def integrity_errors():
     return (sqlite3.IntegrityError,)
 
 
+def column_names(conn, table):
+    """Return the column names of a table (works on both databases)."""
+    if conn.postgres:
+        rows = conn.execute(
+            "SELECT column_name AS name FROM information_schema.columns "
+            "WHERE table_name = ? AND table_schema = current_schema()",
+            (table,),
+        ).fetchall()
+    else:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return [row["name"] for row in rows]
+
+
+def create_school(conn, name):
+    """Insert a school and return its new ID."""
+    row = conn.execute(
+        "INSERT INTO schools (name) VALUES (?) RETURNING id", (name,)
+    ).fetchone()
+    return row["id"]
+
+
+def insert_sample_students(conn, school_id):
+    """Add the sample students to one school."""
+    conn.executemany(
+        "INSERT INTO students "
+        "(school_id, name, grade, section, gender, parent_phone, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(school_id, *student) for student in SAMPLE_STUDENTS],
+    )
+
+
 def init_db():
-    """Create tables, migrate older SQLite files, and add sample students."""
+    """Create tables and migrate older databases to the school-based layout."""
     conn = get_db()
     try:
         with conn:
             if not conn.postgres:
                 # Development-stage migration: replace the old university table.
-                columns = [
-                    row["name"]
-                    for row in conn.execute("PRAGMA table_info(students)").fetchall()
-                ]
+                columns = column_names(conn, "students")
                 if columns and "grade" not in columns:
                     conn.execute("DROP TABLE students")
 
                 # Development-stage migration: accounts now sign in with an
                 # email, so an older username-based table is replaced.
-                user_columns = [
-                    row["name"]
-                    for row in conn.execute("PRAGMA table_info(users)").fetchall()
-                ]
+                user_columns = column_names(conn, "users")
                 if user_columns and "email" not in user_columns:
                     conn.execute("DROP TABLE users")
 
@@ -192,14 +220,9 @@ def init_db():
 
             conn.execute(
                 f"""
-                CREATE TABLE IF NOT EXISTS students (
+                CREATE TABLE IF NOT EXISTS schools (
                     id {pk},
-                    name TEXT NOT NULL,
-                    grade INTEGER NOT NULL,
-                    section TEXT NOT NULL,
-                    gender TEXT NOT NULL,
-                    parent_phone TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'Active'
+                    name TEXT NOT NULL
                 )
                 """
             )
@@ -209,7 +232,22 @@ def init_db():
                     id {pk},
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'teacher'
+                    role TEXT NOT NULL DEFAULT 'teacher',
+                    school_id INTEGER REFERENCES schools (id)
+                )
+                """
+            )
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS students (
+                    id {pk},
+                    school_id INTEGER REFERENCES schools (id),
+                    name TEXT NOT NULL,
+                    grade INTEGER NOT NULL,
+                    section TEXT NOT NULL,
+                    gender TEXT NOT NULL,
+                    parent_phone TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'Active'
                 )
                 """
             )
@@ -241,13 +279,31 @@ def init_db():
                 """
             )
 
-            count = conn.execute("SELECT COUNT(*) AS total FROM students").fetchone()
-            if count["total"] == 0:
-                conn.executemany(
-                    "INSERT INTO students "
-                    "(name, grade, section, gender, parent_phone, status) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    SEED_STUDENTS,
+            # Migration: databases created before schools existed get a
+            # school_id column on users and students.
+            for table in ("users", "students"):
+                if "school_id" not in column_names(conn, table):
+                    conn.execute(
+                        f"ALTER TABLE {table} "
+                        "ADD COLUMN school_id INTEGER REFERENCES schools (id)"
+                    )
+
+            # Everything that already exists moves into one school, so no
+            # account or student is lost. A fresh database creates nothing.
+            orphans = conn.execute(
+                "SELECT "
+                "(SELECT COUNT(*) FROM users WHERE school_id IS NULL) AS users, "
+                "(SELECT COUNT(*) FROM students WHERE school_id IS NULL) AS students"
+            ).fetchone()
+            if orphans["users"] or orphans["students"]:
+                legacy_id = create_school(conn, LEGACY_SCHOOL_NAME)
+                conn.execute(
+                    "UPDATE users SET school_id = ? WHERE school_id IS NULL",
+                    (legacy_id,),
+                )
+                conn.execute(
+                    "UPDATE students SET school_id = ? WHERE school_id IS NULL",
+                    (legacy_id,),
                 )
     finally:
         conn.close()
@@ -261,7 +317,7 @@ def today_local():
 
 @app.before_request
 def load_current_user():
-    """Load the signed-in user (with their current role) for this request."""
+    """Load the signed-in user, their role, and their school for this request."""
     g.user = None
     if request.endpoint == "static":
         return
@@ -273,13 +329,17 @@ def load_current_user():
     conn = get_db()
     try:
         g.user = conn.execute(
-            "SELECT id, email, role FROM users WHERE id = ?", (user_id,)
+            "SELECT u.id, u.email, u.role, u.school_id, s.name AS school_name "
+            "FROM users u LEFT JOIN schools s ON s.id = u.school_id "
+            "WHERE u.id = ?",
+            (user_id,),
         ).fetchone()
     finally:
         conn.close()
 
-    if g.user is None:
-        # The account no longer exists, so end the session.
+    # No account, or an account without a school, is treated as signed out.
+    if g.user is None or g.user["school_id"] is None:
+        g.user = None
         session.clear()
 
 
@@ -325,6 +385,15 @@ def admin_required(view):
         return view(*args, **kwargs)
 
     return wrapped_view
+
+
+def school_id():
+    """Return the school of the signed-in user.
+
+    Every query on students, users, and everything attached to a student must
+    be limited to this value, so one school can never see another's data.
+    """
+    return g.user["school_id"]
 
 
 def read_student_form():
@@ -390,6 +459,17 @@ def validate_registration(email, password, confirm):
         errors["confirm"] = "Passwords do not match."
 
     return errors
+
+
+def validate_school_name(name):
+    """Return an error message for a bad school name, or None if it is fine."""
+    if not name:
+        return "School name is required."
+    if len(name) < MIN_LENGTH:
+        return f"School name must be at least {MIN_LENGTH} characters."
+    if len(name) > MAX_LENGTH:
+        return f"School name must be at most {MAX_LENGTH} characters."
+    return None
 
 
 def average_remark(average):
@@ -585,33 +665,37 @@ def page_not_found(error):
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    """Show the registration form (GET) and create a new user (POST)."""
+    """Create a new school together with its first (admin) account."""
     if g.user is not None:
         return redirect(url_for("dashboard"))
 
     errors = {}
-    form = {"email": ""}
+    form = {"email": "", "school_name": ""}
 
     if request.method == "POST":
         # Emails are stored in lowercase so they match regardless of typing.
         form["email"] = request.form.get("email", "").strip().lower()
+        form["school_name"] = request.form.get("school_name", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
+
         errors = validate_registration(form["email"], password, confirm)
+        school_error = validate_school_name(form["school_name"])
+        if school_error:
+            errors["school_name"] = school_error
 
         if not errors:
             conn = get_db()
             try:
+                # School and admin are created together. If the email is already
+                # taken, the whole transaction is rolled back, so no empty school
+                # is left behind.
                 with conn:
-                    # The very first account becomes the admin.
-                    user_count = conn.execute(
-                        "SELECT COUNT(*) AS total FROM users"
-                    ).fetchone()["total"]
-                    role = "admin" if user_count == 0 else "teacher"
+                    new_school_id = create_school(conn, form["school_name"])
                     conn.execute(
-                        "INSERT INTO users (email, password_hash, role) "
-                        "VALUES (?, ?, ?)",
-                        (form["email"], generate_password_hash(password), role),
+                        "INSERT INTO users (email, password_hash, role, school_id) "
+                        "VALUES (?, ?, 'admin', ?)",
+                        (form["email"], generate_password_hash(password), new_school_id),
                     )
             except integrity_errors():
                 errors["email"] = "This email is already registered."
@@ -619,7 +703,7 @@ def register():
                 conn.close()
 
             if not errors:
-                flash("Account created! You can now log in.", "success")
+                flash("School created! You can now log in.", "success")
                 return redirect(url_for("login"))
 
     return render_template("register.html", form=form, errors=errors)
@@ -667,17 +751,58 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    """Let the signed-in user change their own password."""
+    errors = {}
+
+    if request.method == "POST":
+        current = request.form.get("current_password", "")
+        new = request.form.get("new_password", "")
+        confirm = request.form.get("confirm", "")
+
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE id = ?", (g.user["id"],)
+            ).fetchone()
+
+            if row is None or not check_password_hash(row["password_hash"], current):
+                errors["current_password"] = "Current password is incorrect."
+            if len(new) < MIN_PASSWORD_LENGTH:
+                errors["new_password"] = (
+                    f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+                )
+            elif confirm != new:
+                errors["confirm"] = "Passwords do not match."
+
+            if not errors:
+                with conn:
+                    conn.execute(
+                        "UPDATE users SET password_hash = ? WHERE id = ?",
+                        (generate_password_hash(new), g.user["id"]),
+                    )
+                flash("Password changed.", "success")
+                return redirect(url_for("account"))
+        finally:
+            conn.close()
+
+    return render_template("account.html", errors=errors)
+
+
 # ---------------------------------------------------------------- User routes
 
 
 @app.route("/users")
 @admin_required
 def user_list():
-    """List all accounts so an admin can manage their roles."""
+    """List the accounts of this school so an admin can manage them."""
     conn = get_db()
     try:
         users = conn.execute(
-            "SELECT id, email, role FROM users ORDER BY id"
+            "SELECT id, email, role FROM users WHERE school_id = ? ORDER BY id",
+            (school_id(),),
         ).fetchall()
     finally:
         conn.close()
@@ -685,10 +810,40 @@ def user_list():
     return render_template("users.html", users=users)
 
 
+@app.route("/users/add", methods=["POST"])
+@admin_required
+def add_user():
+    """Create a teacher account inside the admin's own school."""
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    errors = validate_registration(email, password, password)
+    if errors:
+        flash(" ".join(errors.values()), "error")
+        return redirect(url_for("user_list"))
+
+    conn = get_db()
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO users (email, password_hash, role, school_id) "
+                "VALUES (?, ?, 'teacher', ?)",
+                (email, generate_password_hash(password), school_id()),
+            )
+    except integrity_errors():
+        flash("This email is already registered.", "error")
+        return redirect(url_for("user_list"))
+    finally:
+        conn.close()
+
+    flash(f"Teacher account created for {email}.", "success")
+    return redirect(url_for("user_list"))
+
+
 @app.route("/users/<int:user_id>/role", methods=["POST"])
 @admin_required
 def change_role(user_id):
-    """Change a user's role (admins cannot change their own)."""
+    """Change the role of a user in this school (not your own)."""
     new_role = request.form.get("role", "")
 
     if new_role not in ROLES:
@@ -703,7 +858,8 @@ def change_role(user_id):
     try:
         with conn:
             cursor = conn.execute(
-                "UPDATE users SET role = ? WHERE id = ?", (new_role, user_id)
+                "UPDATE users SET role = ? WHERE id = ? AND school_id = ?",
+                (new_role, user_id, school_id()),
             )
         if cursor.rowcount == 0:
             abort(404)
@@ -726,11 +882,14 @@ def dashboard():
     conn = get_db()
     try:
         all_students = conn.execute(
-            "SELECT * FROM students ORDER BY id DESC"
+            "SELECT * FROM students WHERE school_id = ? ORDER BY id DESC",
+            (school_id(),),
         ).fetchall()
         today_rows = conn.execute(
-            "SELECT student_id, status FROM attendance WHERE date = ?",
-            (today.isoformat(),),
+            "SELECT a.student_id AS student_id, a.status AS status "
+            "FROM attendance a JOIN students s ON s.id = a.student_id "
+            "WHERE a.date = ? AND s.school_id = ?",
+            (today.isoformat(), school_id()),
         ).fetchall()
     finally:
         conn.close()
@@ -764,6 +923,30 @@ def dashboard():
     )
 
 
+@app.route("/sample-data", methods=["POST"])
+@admin_required
+def load_sample_data():
+    """Fill an empty school with a few sample students to try the app."""
+    conn = get_db()
+    try:
+        with conn:
+            existing = conn.execute(
+                "SELECT COUNT(*) AS total FROM students WHERE school_id = ?",
+                (school_id(),),
+            ).fetchone()["total"]
+
+            if existing:
+                flash("Sample data can only be added to an empty school.", "error")
+                return redirect(url_for("dashboard"))
+
+            insert_sample_students(conn, school_id())
+    finally:
+        conn.close()
+
+    flash("Sample students added.", "success")
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/students")
 @login_required
 def student_list():
@@ -773,8 +956,8 @@ def student_list():
     # A missing or non-numeric page number falls back to page 1.
     requested_page = request.args.get("page", 1, type=int)
 
-    conditions = []
-    params = []
+    conditions = ["school_id = ?"]
+    params = [school_id()]
 
     if query:
         # LOWER() on both sides gives a case-insensitive search in both databases.
@@ -786,7 +969,7 @@ def student_list():
     else:
         grade_filter = ""
 
-    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    where = " WHERE " + " AND ".join(conditions)
 
     conn = get_db()
     try:
@@ -838,9 +1021,10 @@ def add_student():
                 with conn:
                     conn.execute(
                         "INSERT INTO students "
-                        "(name, grade, section, gender, parent_phone, status) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        "(school_id, name, grade, section, gender, parent_phone, status) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (
+                            school_id(),
                             form["name"],
                             int(form["grade"]),
                             form["section"],
@@ -864,7 +1048,8 @@ def edit_student(student_id):
     conn = get_db()
     try:
         student = conn.execute(
-            "SELECT * FROM students WHERE id = ?", (student_id,)
+            "SELECT * FROM students WHERE id = ? AND school_id = ?",
+            (student_id, school_id()),
         ).fetchone()
         if student is None:
             abort(404)
@@ -887,7 +1072,8 @@ def edit_student(student_id):
                 with conn:
                     conn.execute(
                         "UPDATE students SET name = ?, grade = ?, section = ?, "
-                        "gender = ?, parent_phone = ?, status = ? WHERE id = ?",
+                        "gender = ?, parent_phone = ?, status = ? "
+                        "WHERE id = ? AND school_id = ?",
                         (
                             form["name"],
                             int(form["grade"]),
@@ -896,6 +1082,7 @@ def edit_student(student_id):
                             form["parent_phone"],
                             form["status"],
                             student_id,
+                            school_id(),
                         ),
                     )
                 flash("Student updated successfully!", "success")
@@ -913,7 +1100,10 @@ def delete_student(student_id):
     conn = get_db()
     try:
         with conn:
-            cursor = conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+            cursor = conn.execute(
+                "DELETE FROM students WHERE id = ? AND school_id = ?",
+                (student_id, school_id()),
+            )
         if cursor.rowcount == 0:
             abort(404)
     finally:
@@ -934,7 +1124,8 @@ def report_card(student_id):
     conn = get_db()
     try:
         student = conn.execute(
-            "SELECT * FROM students WHERE id = ?", (student_id,)
+            "SELECT * FROM students WHERE id = ? AND school_id = ?",
+            (student_id, school_id()),
         ).fetchone()
         if student is None:
             abort(404)
@@ -950,13 +1141,13 @@ def report_card(student_id):
             (student_id,),
         ).fetchall()
 
-        # Average per classmate (same grade and section) for ranking.
+        # Average per classmate (same school, grade, and section) for ranking.
         class_rows = conn.execute(
             "SELECT m.student_id AS student_id, AVG(m.score) AS average "
             "FROM marks m JOIN students s ON s.id = m.student_id "
-            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
-            "AND m.term = ? GROUP BY m.student_id",
-            (student["grade"], student["section"], term),
+            "WHERE s.school_id = ? AND s.grade = ? AND s.section = ? "
+            "AND s.status = 'Active' AND m.term = ? GROUP BY m.student_id",
+            (school_id(), student["grade"], student["section"], term),
         ).fetchall()
     finally:
         conn.close()
@@ -1020,10 +1211,8 @@ def report_card(student_id):
     )
 
 
-@app.route("/class-report")
-@login_required
-def class_report():
-    """Show every student's marks, average, and rank for one class and term."""
+def read_class_filters():
+    """Read and validate the grade, section, and term from the URL."""
     grade = request.args.get("grade", "9")
     if grade not in [str(g) for g in GRADES]:
         grade = "9"
@@ -1036,25 +1225,40 @@ def class_report():
     if term not in TERMS:
         term = TERMS[0]
 
+    return grade, section, term
+
+
+def fetch_class_report_data(grade, section, term):
+    """Load one class's active students and marks, limited to this school."""
     conn = get_db()
     try:
         class_students = conn.execute(
             "SELECT * FROM students "
-            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
-            (int(grade), section),
+            "WHERE school_id = ? AND grade = ? AND section = ? "
+            "AND status = 'Active' ORDER BY name, id",
+            (school_id(), int(grade), section),
         ).fetchall()
 
         mark_rows = conn.execute(
             "SELECT m.student_id AS student_id, m.subject AS subject, "
             "m.score AS score "
             "FROM marks m JOIN students s ON s.id = m.student_id "
-            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
-            "AND m.term = ?",
-            (int(grade), section, term),
+            "WHERE s.school_id = ? AND s.grade = ? AND s.section = ? "
+            "AND s.status = 'Active' AND m.term = ?",
+            (school_id(), int(grade), section, term),
         ).fetchall()
     finally:
         conn.close()
 
+    return class_students, mark_rows
+
+
+@app.route("/class-report")
+@login_required
+def class_report():
+    """Show every student's marks, average, and rank for one class and term."""
+    grade, section, term = read_class_filters()
+    class_students, mark_rows = fetch_class_report_data(grade, section, term)
     rows, subject_stats, summary = build_class_report(class_students, mark_rows)
 
     return render_template(
@@ -1093,11 +1297,13 @@ def attendance():
     try:
         class_students = conn.execute(
             "SELECT * FROM students "
-            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
-            (int(grade), section),
+            "WHERE school_id = ? AND grade = ? AND section = ? "
+            "AND status = 'Active' ORDER BY name, id",
+            (school_id(), int(grade), section),
         ).fetchall()
 
         if request.method == "POST":
+            # Only students of this class (and so of this school) are saved.
             records = []
             for student in class_students:
                 value = request.form.get(f"status_{student['id']}")
@@ -1117,7 +1323,10 @@ def attendance():
             )
 
         rows = conn.execute(
-            "SELECT student_id, status FROM attendance WHERE date = ?", (date_iso,)
+            "SELECT a.student_id AS student_id, a.status AS status "
+            "FROM attendance a JOIN students s ON s.id = a.student_id "
+            "WHERE a.date = ? AND s.school_id = ?",
+            (date_iso, school_id()),
         ).fetchall()
     finally:
         conn.close()
@@ -1170,11 +1379,13 @@ def marks():
     try:
         class_students = conn.execute(
             "SELECT * FROM students "
-            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
-            (int(grade), section),
+            "WHERE school_id = ? AND grade = ? AND section = ? "
+            "AND status = 'Active' ORDER BY name, id",
+            (school_id(), int(grade), section),
         ).fetchall()
 
         if request.method == "POST":
+            # Only students of this class (and so of this school) are saved.
             records = []
             for student in class_students:
                 raw = request.form.get(f"score_{student['id']}", "").strip()
@@ -1217,8 +1428,10 @@ def marks():
             flash("Please fix the highlighted scores.", "error")
 
         rows = conn.execute(
-            "SELECT student_id, score FROM marks WHERE subject = ? AND term = ?",
-            (subject, term),
+            "SELECT m.student_id AS student_id, m.score AS score "
+            "FROM marks m JOIN students s ON s.id = m.student_id "
+            "WHERE m.subject = ? AND m.term = ? AND s.school_id = ?",
+            (subject, term, school_id()),
         ).fetchall()
     finally:
         conn.close()
@@ -1254,7 +1467,6 @@ def marks():
     )
 
 
-init_db()
 # -------------------------------------------------------------- Export routes
 
 
@@ -1264,23 +1476,6 @@ def csv_response(filename, headers, rows):
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     response.headers["Cache-Control"] = "no-store"
     return response
-
-
-def read_class_filters():
-    """Read and validate the grade, section, and term from the URL."""
-    grade = request.args.get("grade", "9")
-    if grade not in [str(g) for g in GRADES]:
-        grade = "9"
-
-    section = request.args.get("section", "A")
-    if section not in SECTIONS:
-        section = "A"
-
-    term = request.args.get("term", TERMS[0])
-    if term not in TERMS:
-        term = TERMS[0]
-
-    return grade, section, term
 
 
 @app.route("/export")
@@ -1297,9 +1492,8 @@ def students_export():
     query = request.args.get("q", "").strip()
     grade_filter = request.args.get("grade", "").strip()
 
-    sql = "SELECT * FROM students"
-    conditions = []
-    params = []
+    conditions = ["school_id = ?"]
+    params = [school_id()]
 
     if query:
         conditions.append("LOWER(name) LIKE LOWER(?)")
@@ -1308,9 +1502,11 @@ def students_export():
         conditions.append("grade = ?")
         params.append(int(grade_filter))
 
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
-    sql += " ORDER BY grade, section, name"
+    sql = (
+        "SELECT * FROM students WHERE "
+        + " AND ".join(conditions)
+        + " ORDER BY grade, section, name, id"
+    )
 
     conn = get_db()
     try:
@@ -1342,26 +1538,7 @@ def students_export():
 def class_report_export():
     """Download the class report for one grade, section, and term."""
     grade, section, term = read_class_filters()
-
-    conn = get_db()
-    try:
-        class_students = conn.execute(
-            "SELECT * FROM students "
-            "WHERE grade = ? AND section = ? AND status = 'Active' ORDER BY name",
-            (int(grade), section),
-        ).fetchall()
-
-        mark_rows = conn.execute(
-            "SELECT m.student_id AS student_id, m.subject AS subject, "
-            "m.score AS score "
-            "FROM marks m JOIN students s ON s.id = m.student_id "
-            "WHERE s.grade = ? AND s.section = ? AND s.status = 'Active' "
-            "AND m.term = ?",
-            (int(grade), section, term),
-        ).fetchall()
-    finally:
-        conn.close()
-
+    class_students, mark_rows = fetch_class_report_data(grade, section, term)
     report_rows, subject_stats, _summary = build_class_report(
         class_students, mark_rows
     )
@@ -1404,7 +1581,7 @@ def class_report_export():
 @app.route("/export/marks.csv")
 @admin_required
 def marks_export():
-    """Download every mark (a backup of all scores)."""
+    """Download every mark of this school (a backup of all scores)."""
     conn = get_db()
     try:
         mark_rows = conn.execute(
@@ -1412,7 +1589,9 @@ def marks_export():
             "s.section AS section, m.term AS term, m.subject AS subject, "
             "m.score AS score "
             "FROM marks m JOIN students s ON s.id = m.student_id "
-            "ORDER BY s.grade, s.section, s.name, m.term, m.subject"
+            "WHERE s.school_id = ? "
+            "ORDER BY s.grade, s.section, s.name, m.term, m.subject",
+            (school_id(),),
         ).fetchall()
     finally:
         conn.close()
@@ -1439,14 +1618,16 @@ def marks_export():
 @app.route("/export/attendance.csv")
 @admin_required
 def attendance_export():
-    """Download every attendance record (a backup of all attendance)."""
+    """Download every attendance record of this school (a backup)."""
     conn = get_db()
     try:
         attendance_rows = conn.execute(
             "SELECT s.id AS student_id, s.name AS name, s.grade AS grade, "
             "s.section AS section, a.date AS day, a.status AS status "
             "FROM attendance a JOIN students s ON s.id = a.student_id "
-            "ORDER BY a.date, s.grade, s.section, s.name"
+            "WHERE s.school_id = ? "
+            "ORDER BY a.date, s.grade, s.section, s.name",
+            (school_id(),),
         ).fetchall()
     finally:
         conn.close()
@@ -1460,6 +1641,10 @@ def attendance_export():
         ["Student ID", "Name", "Grade", "Section", "Date", "Status"],
         rows,
     )
+
+
+init_db()
+
 if __name__ == "__main__":
     # Debug mode is only enabled when FLASK_DEBUG=1 is set (local development).
     app.run(debug=os.environ.get("FLASK_DEBUG") == "1")

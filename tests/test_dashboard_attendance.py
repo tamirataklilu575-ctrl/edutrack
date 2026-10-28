@@ -5,32 +5,22 @@ from datetime import date
 import pytest
 
 import app as app_module
+from helpers import attendance_data
 
 TODAY = date(2026, 10, 20)
 TODAY_ISO = TODAY.isoformat()
 
 
 @pytest.fixture
-def admin_client(tmp_path, monkeypatch):
-    """A logged-in admin client where 'today' is fixed to TODAY."""
-    monkeypatch.setattr(app_module, "DATABASE", tmp_path / "dashboard.db")
+def admin_client(auth_client, monkeypatch):
+    """The signed-in admin client, with 'today' fixed to TODAY."""
     monkeypatch.setattr(app_module, "today_local", lambda: TODAY)
-    app_module.init_db()
-    app_module.app.config["TESTING"] = True
-
-    with app_module.app.test_client() as client:
-        credentials = {"email": "boss@example.com", "password": "secret123"}
-        client.post("/register", data={**credentials, "confirm": "secret123"})
-        client.post("/login", data=credentials)
-        yield client
+    return auth_client
 
 
-def save_attendance(client, status, day=TODAY_ISO, grade="9", section="A"):
+def save_attendance(client, status, day=TODAY_ISO):
     """Record attendance for student 1 (Grade 9, Section A)."""
-    return client.post(
-        "/attendance",
-        data={"grade": grade, "section": section, "date": day, "status_1": status},
-    )
+    return client.post("/attendance", data=attendance_data(status, day=day))
 
 
 # ------------------------------------------------------------ Summary logic

@@ -5,8 +5,25 @@
 {% block content %}
 <header class="page-header">
     <h2>Dashboard</h2>
-    <p>Overview of your high school records.</p>
+    <p>Overview of {{ current_user.school_name }}.</p>
 </header>
+
+{% if stats.total == 0 %}
+<section class="panel section-gap">
+    <h3>Welcome! Your school is empty.</h3>
+    <p class="muted-note">Add your first student, or load a few sample students to try the app.</p>
+    {% if current_user.role == 'admin' %}
+    <div class="header-actions">
+        <a href="{{ url_for('add_student') }}" class="btn">+ Add Student</a>
+        <form method="POST" action="{{ url_for('load_sample_data') }}">
+            <button type="submit" class="btn btn-outline">Load Sample Students</button>
+        </form>
+    </div>
+    {% else %}
+    <p class="muted-note">Ask your school administrator to add students.</p>
+    {% endif %}
+</section>
+{% endif %}
 
 <section class="stats-grid">
     <div class="card">
