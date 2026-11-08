@@ -58,7 +58,7 @@ SUBJECTS = (
     "Civics",
 )
 TERMS = ("Semester 1", "Semester 2")
-ROLES = ("admin", "teacher")
+ROLES = ("admin", "teacher")  # the "owner" role is created from environment variables
 PASS_MARK = 50
 
 # How many students appear on one page of the student list.
@@ -69,8 +69,15 @@ MAX_LENGTH = 100
 PHONE_PATTERN = re.compile(r"^\+?[0-9 ]{9,15}$")
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+USERNAME_PATTERN = re.compile(r"^[a-z0-9._-]{3,30}$")
 MAX_EMAIL_LENGTH = 254
 MIN_PASSWORD_LENGTH = 6
+MIN_OWNER_PASSWORD_LENGTH = 8
+
+# The platform owner creates schools and their first admin. This account comes
+# from environment variables, because there is no public registration.
+OWNER_LOGIN = os.environ.get("OWNER_LOGIN", "").strip().lower()
+OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "")
 
 # Name given to the school that adopts data created before schools existed.
 LEGACY_SCHOOL_NAME = "My School"
@@ -196,8 +203,44 @@ def insert_sample_students(conn, school_id):
     )
 
 
+def ensure_owner(conn):
+    """Create (or refresh the password of) the owner account from the environment.
+
+    The owner is not tied to a school and cannot see any school's data. It only
+    creates schools and resets school admins' passwords. Changing OWNER_PASSWORD
+    and restarting the app is how the owner's password is changed.
+    """
+    if not OWNER_LOGIN or not OWNER_PASSWORD:
+        return
+
+    problem = validate_login(OWNER_LOGIN)
+    if problem is None and len(OWNER_PASSWORD) < MIN_OWNER_PASSWORD_LENGTH:
+        problem = f"OWNER_PASSWORD must be at least {MIN_OWNER_PASSWORD_LENGTH} characters."
+    if problem:
+        print(f"Owner account not created: {problem}")
+        return
+
+    row = conn.execute(
+        "SELECT id, role, password_hash FROM users WHERE login = ?", (OWNER_LOGIN,)
+    ).fetchone()
+
+    if row is None:
+        conn.execute(
+            "INSERT INTO users (login, password_hash, role) VALUES (?, ?, 'owner')",
+            (OWNER_LOGIN, generate_password_hash(OWNER_PASSWORD)),
+        )
+    elif row["role"] != "owner":
+        # Never turn an existing school account into the owner.
+        print("Owner account not created: OWNER_LOGIN belongs to a school account.")
+    elif not check_password_hash(row["password_hash"], OWNER_PASSWORD):
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(OWNER_PASSWORD), row["id"]),
+        )
+
+
 def init_db():
-    """Create tables and migrate older databases to the school-based layout."""
+    """Create tables and migrate older databases to the current layout."""
     conn = get_db()
     try:
         with conn:
@@ -207,10 +250,9 @@ def init_db():
                 if columns and "grade" not in columns:
                     conn.execute("DROP TABLE students")
 
-                # Development-stage migration: accounts now sign in with an
-                # email, so an older username-based table is replaced.
+                # Development-stage migration: very old username-only tables.
                 user_columns = column_names(conn, "users")
-                if user_columns and "email" not in user_columns:
+                if user_columns and "email" not in user_columns and "login" not in user_columns:
                     conn.execute("DROP TABLE users")
 
             # Primary-key syntax differs between the two databases.
@@ -230,10 +272,11 @@ def init_db():
                 f"""
                 CREATE TABLE IF NOT EXISTS users (
                     id {pk},
-                    email TEXT NOT NULL UNIQUE,
+                    login TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'teacher',
-                    school_id INTEGER REFERENCES schools (id)
+                    school_id INTEGER REFERENCES schools (id),
+                    active INTEGER NOT NULL DEFAULT 1
                 )
                 """
             )
@@ -279,6 +322,12 @@ def init_db():
                 """
             )
 
+            # Migration: accounts used to sign in with an "email" column. The
+            # same column now holds an email OR a username, so it is renamed.
+            user_columns = column_names(conn, "users")
+            if "email" in user_columns and "login" not in user_columns:
+                conn.execute("ALTER TABLE users RENAME COLUMN email TO login")
+
             # Migration: databases created before schools existed get a
             # school_id column on users and students.
             for table in ("users", "students"):
@@ -288,23 +337,34 @@ def init_db():
                         "ADD COLUMN school_id INTEGER REFERENCES schools (id)"
                     )
 
+            # Migration: accounts can be disabled (1 = active, 0 = disabled).
+            if "active" not in column_names(conn, "users"):
+                conn.execute(
+                    "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1"
+                )
+
             # Everything that already exists moves into one school, so no
-            # account or student is lost. A fresh database creates nothing.
+            # account or student is lost. The owner has no school on purpose.
+            # A fresh database creates nothing.
             orphans = conn.execute(
                 "SELECT "
-                "(SELECT COUNT(*) FROM users WHERE school_id IS NULL) AS users, "
+                "(SELECT COUNT(*) FROM users "
+                " WHERE school_id IS NULL AND role != 'owner') AS users, "
                 "(SELECT COUNT(*) FROM students WHERE school_id IS NULL) AS students"
             ).fetchone()
             if orphans["users"] or orphans["students"]:
                 legacy_id = create_school(conn, LEGACY_SCHOOL_NAME)
                 conn.execute(
-                    "UPDATE users SET school_id = ? WHERE school_id IS NULL",
+                    "UPDATE users SET school_id = ? "
+                    "WHERE school_id IS NULL AND role != 'owner'",
                     (legacy_id,),
                 )
                 conn.execute(
                     "UPDATE students SET school_id = ? WHERE school_id IS NULL",
                     (legacy_id,),
                 )
+
+            ensure_owner(conn)
     finally:
         conn.close()
 
@@ -329,7 +389,8 @@ def load_current_user():
     conn = get_db()
     try:
         g.user = conn.execute(
-            "SELECT u.id, u.email, u.role, u.school_id, s.name AS school_name "
+            "SELECT u.id, u.login, u.role, u.school_id, u.active, "
+            "s.name AS school_name "
             "FROM users u LEFT JOIN schools s ON s.id = u.school_id "
             "WHERE u.id = ?",
             (user_id,),
@@ -337,8 +398,13 @@ def load_current_user():
     finally:
         conn.close()
 
-    # No account, or an account without a school, is treated as signed out.
-    if g.user is None or g.user["school_id"] is None:
+    # No account, a disabled account, or a school account without a school is
+    # treated as signed out. Only the owner may have no school.
+    if (
+        g.user is None
+        or not g.user["active"]
+        or (g.user["school_id"] is None and g.user["role"] != "owner")
+    ):
         g.user = None
         session.clear()
 
@@ -359,27 +425,51 @@ def inject_options():
 
 
 def login_required(view):
-    """Redirect to the login page if the user is not signed in."""
+    """Redirect to the login page if the user is not signed in.
+
+    The owner has no school, so the owner is sent to the Schools page instead
+    of any page that shows school data.
+    """
 
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if g.user is None:
             flash("Please log in to continue.", "error")
             return redirect(url_for("login"))
+        if g.user["role"] == "owner":
+            return redirect(url_for("owner_home"))
         return view(*args, **kwargs)
 
     return wrapped_view
 
 
 def admin_required(view):
-    """Allow only signed-in admins; send everyone else away with a message."""
+    """Allow only signed-in school admins; send everyone else away."""
 
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if g.user is None:
             flash("Please log in to continue.", "error")
             return redirect(url_for("login"))
+        if g.user["role"] == "owner":
+            return redirect(url_for("owner_home"))
         if g.user["role"] != "admin":
+            flash("You do not have permission to do that.", "error")
+            return redirect(url_for("dashboard"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
+def owner_required(view):
+    """Allow only the platform owner."""
+
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.user is None:
+            flash("Please log in to continue.", "error")
+            return redirect(url_for("login"))
+        if g.user["role"] != "owner":
             flash("You do not have permission to do that.", "error")
             return redirect(url_for("dashboard"))
         return view(*args, **kwargs)
@@ -439,26 +529,34 @@ def validate_student(form):
     return errors
 
 
-def validate_registration(email, password, confirm):
-    """Return a dict of field errors for the registration form."""
-    errors = {}
+def clean_login(raw):
+    """Normalise a login so it matches regardless of letter case or spaces."""
+    return raw.strip().lower()
 
-    if not email:
-        errors["email"] = "Email is required."
-    elif len(email) > MAX_EMAIL_LENGTH or not EMAIL_PATTERN.match(email):
-        errors["email"] = "Enter a valid email address."
 
-    if not password:
-        errors["password"] = "Password is required."
-    elif len(password) < MIN_PASSWORD_LENGTH:
-        errors["password"] = (
-            f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+def validate_login(login_name):
+    """Return an error message for a bad login (email or username), or None."""
+    if not login_name:
+        return "Login is required."
+    if "@" in login_name:
+        if len(login_name) > MAX_EMAIL_LENGTH or not EMAIL_PATTERN.match(login_name):
+            return "Enter a valid email address."
+        return None
+    if not USERNAME_PATTERN.match(login_name):
+        return (
+            "A username must be 3-30 characters: lowercase letters, numbers, "
+            "dots, dashes, or underscores."
         )
+    return None
 
-    if password and confirm != password:
-        errors["confirm"] = "Passwords do not match."
 
-    return errors
+def validate_password(password):
+    """Return an error message for a bad password, or None."""
+    if not password:
+        return "Password is required."
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    return None
 
 
 def validate_school_name(name):
@@ -663,82 +761,51 @@ def page_not_found(error):
 # ---------------------------------------------------------------- Auth routes
 
 
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    """Create a new school together with its first (admin) account."""
-    if g.user is not None:
-        return redirect(url_for("dashboard"))
-
-    errors = {}
-    form = {"email": "", "school_name": ""}
-
-    if request.method == "POST":
-        # Emails are stored in lowercase so they match regardless of typing.
-        form["email"] = request.form.get("email", "").strip().lower()
-        form["school_name"] = request.form.get("school_name", "").strip()
-        password = request.form.get("password", "")
-        confirm = request.form.get("confirm", "")
-
-        errors = validate_registration(form["email"], password, confirm)
-        school_error = validate_school_name(form["school_name"])
-        if school_error:
-            errors["school_name"] = school_error
-
-        if not errors:
-            conn = get_db()
-            try:
-                # School and admin are created together. If the email is already
-                # taken, the whole transaction is rolled back, so no empty school
-                # is left behind.
-                with conn:
-                    new_school_id = create_school(conn, form["school_name"])
-                    conn.execute(
-                        "INSERT INTO users (email, password_hash, role, school_id) "
-                        "VALUES (?, ?, 'admin', ?)",
-                        (form["email"], generate_password_hash(password), new_school_id),
-                    )
-            except integrity_errors():
-                errors["email"] = "This email is already registered."
-            finally:
-                conn.close()
-
-            if not errors:
-                flash("School created! You can now log in.", "success")
-                return redirect(url_for("login"))
-
-    return render_template("register.html", form=form, errors=errors)
-
-
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """Show the login form (GET) and sign the user in (POST)."""
+    """Show the login form (GET) and sign the user in (POST).
+
+    There is no public registration: accounts are created by the platform
+    owner (school admins) and by school admins (teachers).
+    """
     if g.user is not None:
         return redirect(url_for("dashboard"))
 
-    form = {"email": ""}
+    form = {"login": ""}
 
     if request.method == "POST":
-        form["email"] = request.form.get("email", "").strip().lower()
+        form["login"] = clean_login(request.form.get("login", ""))
         password = request.form.get("password", "")
 
         conn = get_db()
         try:
             user = conn.execute(
-                "SELECT * FROM users WHERE email = ?", (form["email"],)
+                "SELECT * FROM users WHERE login = ?", (form["login"],)
             ).fetchone()
         finally:
             conn.close()
 
         if user is not None and check_password_hash(user["password_hash"], password):
+            if not user["active"]:
+                # Only someone who knows the password sees this message.
+                flash(
+                    "This account has been disabled. "
+                    "Please contact your school administrator.",
+                    "error",
+                )
+                return render_template("login.html", form=form)
+
             session.clear()
             # A permanent session survives closing the browser (up to 7 days).
             session.permanent = True
             session["user_id"] = user["id"]
-            flash(f"Welcome back, {user['email']}!", "success")
+            flash(f"Welcome back, {user['login']}!", "success")
+            if user["role"] == "owner":
+                return redirect(url_for("owner_home"))
             return redirect(url_for("dashboard"))
 
-        # Same message for unknown email and wrong password (security best practice).
-        flash("Invalid email or password.", "error")
+        # Same message for an unknown login and a wrong password.
+        flash("Invalid login or password.", "error")
 
     return render_template("login.html", form=form)
 
@@ -754,10 +821,22 @@ def logout():
 @app.route("/account", methods=["GET", "POST"])
 @login_required
 def account():
-    """Let the signed-in user change their own password."""
+    """Show the account. Only admins can change their own password.
+
+    Teachers cannot change their password; their administrator does it.
+    """
+    can_change = g.user["role"] == "admin"
     errors = {}
 
     if request.method == "POST":
+        if not can_change:
+            flash(
+                "Passwords are changed by your school administrator. "
+                "Please ask them.",
+                "error",
+            )
+            return redirect(url_for("account"))
+
         current = request.form.get("current_password", "")
         new = request.form.get("new_password", "")
         confirm = request.form.get("confirm", "")
@@ -770,10 +849,10 @@ def account():
 
             if row is None or not check_password_hash(row["password_hash"], current):
                 errors["current_password"] = "Current password is incorrect."
-            if len(new) < MIN_PASSWORD_LENGTH:
-                errors["new_password"] = (
-                    f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
-                )
+
+            password_error = validate_password(new)
+            if password_error:
+                errors["new_password"] = password_error
             elif confirm != new:
                 errors["confirm"] = "Passwords do not match."
 
@@ -788,7 +867,7 @@ def account():
         finally:
             conn.close()
 
-    return render_template("account.html", errors=errors)
+    return render_template("account.html", errors=errors, can_change=can_change)
 
 
 # ---------------------------------------------------------------- User routes
@@ -801,7 +880,8 @@ def user_list():
     conn = get_db()
     try:
         users = conn.execute(
-            "SELECT id, email, role FROM users WHERE school_id = ? ORDER BY id",
+            "SELECT id, login, role, active FROM users "
+            "WHERE school_id = ? ORDER BY id",
             (school_id(),),
         ).fetchall()
     finally:
@@ -814,30 +894,45 @@ def user_list():
 @admin_required
 def add_user():
     """Create a teacher account inside the admin's own school."""
-    email = request.form.get("email", "").strip().lower()
+    login_name = clean_login(request.form.get("login", ""))
     password = request.form.get("password", "")
 
-    errors = validate_registration(email, password, password)
-    if errors:
-        flash(" ".join(errors.values()), "error")
+    problem = validate_login(login_name) or validate_password(password)
+    if problem:
+        flash(problem, "error")
         return redirect(url_for("user_list"))
 
     conn = get_db()
     try:
         with conn:
             conn.execute(
-                "INSERT INTO users (email, password_hash, role, school_id) "
+                "INSERT INTO users (login, password_hash, role, school_id) "
                 "VALUES (?, ?, 'teacher', ?)",
-                (email, generate_password_hash(password), school_id()),
+                (login_name, generate_password_hash(password), school_id()),
             )
     except integrity_errors():
-        flash("This email is already registered.", "error")
+        flash("This login is already in use.", "error")
         return redirect(url_for("user_list"))
     finally:
         conn.close()
 
-    flash(f"Teacher account created for {email}.", "success")
+    flash(f"Teacher account created for {login_name}.", "success")
     return redirect(url_for("user_list"))
+
+
+def other_user_in_school(conn, user_id):
+    """Return another user of this school, or stop with a 404.
+
+    Used by every action on someone else's account, so an admin can never
+    touch an account of a different school, or their own account by mistake.
+    """
+    user = conn.execute(
+        "SELECT id, login, role FROM users WHERE id = ? AND school_id = ?",
+        (user_id, school_id()),
+    ).fetchone()
+    if user is None:
+        abort(404)
+    return user
 
 
 @app.route("/users/<int:user_id>/role", methods=["POST"])
@@ -856,18 +951,176 @@ def change_role(user_id):
 
     conn = get_db()
     try:
+        other_user_in_school(conn, user_id)
         with conn:
-            cursor = conn.execute(
+            conn.execute(
                 "UPDATE users SET role = ? WHERE id = ? AND school_id = ?",
                 (new_role, user_id, school_id()),
+            )
+    finally:
+        conn.close()
+
+    flash("Role updated.", "success")
+    return redirect(url_for("user_list"))
+
+
+@app.route("/users/<int:user_id>/password", methods=["POST"])
+@admin_required
+def reset_user_password(user_id):
+    """Set a new password for another user of this school."""
+    password = request.form.get("password", "")
+
+    if user_id == g.user["id"]:
+        flash("Change your own password on the Account page.", "error")
+        return redirect(url_for("user_list"))
+
+    problem = validate_password(password)
+    if problem:
+        flash(problem, "error")
+        return redirect(url_for("user_list"))
+
+    conn = get_db()
+    try:
+        target = other_user_in_school(conn, user_id)
+        with conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ? AND school_id = ?",
+                (generate_password_hash(password), user_id, school_id()),
+            )
+    finally:
+        conn.close()
+
+    flash(f"Password updated for {target['login']}.", "success")
+    return redirect(url_for("user_list"))
+
+
+@app.route("/users/<int:user_id>/active", methods=["POST"])
+@admin_required
+def set_user_active(user_id):
+    """Disable or re-enable another user of this school."""
+    wanted = request.form.get("active") == "1"
+
+    if user_id == g.user["id"]:
+        flash("You cannot disable your own account.", "error")
+        return redirect(url_for("user_list"))
+
+    conn = get_db()
+    try:
+        target = other_user_in_school(conn, user_id)
+        with conn:
+            conn.execute(
+                "UPDATE users SET active = ? WHERE id = ? AND school_id = ?",
+                (1 if wanted else 0, user_id, school_id()),
+            )
+    finally:
+        conn.close()
+
+    word = "enabled" if wanted else "disabled"
+    flash(f"Account {word} for {target['login']}.", "success")
+    return redirect(url_for("user_list"))
+
+
+# --------------------------------------------------------------- Owner routes
+
+
+@app.route("/owner", methods=["GET", "POST"])
+@owner_required
+def owner_home():
+    """List schools and create new ones (each with its first admin)."""
+    errors = {}
+    form = {"school_name": "", "login": ""}
+
+    if request.method == "POST":
+        form["school_name"] = request.form.get("school_name", "").strip()
+        form["login"] = clean_login(request.form.get("login", ""))
+        password = request.form.get("password", "")
+
+        school_error = validate_school_name(form["school_name"])
+        if school_error:
+            errors["school_name"] = school_error
+        login_error = validate_login(form["login"])
+        if login_error:
+            errors["login"] = login_error
+        password_error = validate_password(password)
+        if password_error:
+            errors["password"] = password_error
+
+        if not errors:
+            conn = get_db()
+            try:
+                # School and admin are created together. If the login is already
+                # taken, everything is rolled back, so no empty school remains.
+                with conn:
+                    new_school_id = create_school(conn, form["school_name"])
+                    conn.execute(
+                        "INSERT INTO users (login, password_hash, role, school_id) "
+                        "VALUES (?, ?, 'admin', ?)",
+                        (form["login"], generate_password_hash(password), new_school_id),
+                    )
+            except integrity_errors():
+                errors["login"] = "This login is already in use."
+            finally:
+                conn.close()
+
+            if not errors:
+                flash(
+                    f"School '{form['school_name']}' created. "
+                    "Give the admin their login and password.",
+                    "success",
+                )
+                return redirect(url_for("owner_home"))
+
+    conn = get_db()
+    try:
+        # Only counts are shown: the owner never sees student or teacher data.
+        school_rows = conn.execute(
+            "SELECT s.id AS id, s.name AS name, "
+            "(SELECT COUNT(*) FROM students st WHERE st.school_id = s.id) AS students, "
+            "(SELECT COUNT(*) FROM users u WHERE u.school_id = s.id) AS users "
+            "FROM schools s ORDER BY s.id"
+        ).fetchall()
+        admin_rows = conn.execute(
+            "SELECT id, login, school_id, active FROM users "
+            "WHERE role = 'admin' AND school_id IS NOT NULL ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    schools = []
+    for row in school_rows:
+        school = dict(row)
+        school["admins"] = [a for a in admin_rows if a["school_id"] == school["id"]]
+        schools.append(school)
+
+    return render_template("owner.html", schools=schools, form=form, errors=errors)
+
+
+@app.route("/owner/users/<int:user_id>/password", methods=["POST"])
+@owner_required
+def owner_reset_admin_password(user_id):
+    """Set a new password for a school's admin (for example, a forgotten one)."""
+    password = request.form.get("password", "")
+
+    problem = validate_password(password)
+    if problem:
+        flash(problem, "error")
+        return redirect(url_for("owner_home"))
+
+    conn = get_db()
+    try:
+        with conn:
+            cursor = conn.execute(
+                "UPDATE users SET password_hash = ? "
+                "WHERE id = ? AND role = 'admin' AND school_id IS NOT NULL",
+                (generate_password_hash(password), user_id),
             )
         if cursor.rowcount == 0:
             abort(404)
     finally:
         conn.close()
 
-    flash("Role updated.", "success")
-    return redirect(url_for("user_list"))
+    flash("Admin password updated.", "success")
+    return redirect(url_for("owner_home"))
 
 
 # ------------------------------------------------------------- Student routes

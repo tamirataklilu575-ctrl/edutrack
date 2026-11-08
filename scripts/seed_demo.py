@@ -23,7 +23,7 @@ import app as app_module  # noqa: E402
 from werkzeug.security import generate_password_hash  # noqa: E402
 
 DEMO_SCHOOL_NAME = "Demo School"
-DEMO_EMAIL = "admin@example.com"
+DEMO_LOGIN = "admin@example.com"
 DEMO_PASSWORD = "demo123"
 
 MALE_NAMES = [
@@ -98,17 +98,17 @@ def seed_demo_data(today=None):
                 (DEMO_SCHOOL_NAME,),
             ).fetchone()["total"]
             taken = conn.execute(
-                "SELECT COUNT(*) AS total FROM users WHERE email = ?",
-                (DEMO_EMAIL,),
+                "SELECT COUNT(*) AS total FROM users WHERE login = ?",
+                (DEMO_LOGIN,),
             ).fetchone()["total"]
             if exists or taken:
                 return None
 
             school_id = app_module.create_school(conn, DEMO_SCHOOL_NAME)
             conn.execute(
-                "INSERT INTO users (email, password_hash, role, school_id) "
+                "INSERT INTO users (login, password_hash, role, school_id) "
                 "VALUES (?, ?, 'admin', ?)",
-                (DEMO_EMAIL, generate_password_hash(DEMO_PASSWORD), school_id),
+                (DEMO_LOGIN, generate_password_hash(DEMO_PASSWORD), school_id),
             )
 
             conn.executemany(
@@ -183,14 +183,14 @@ def main(argv):
 
     result = seed_demo_data()
     if result is None:
-        print("The demo school (or its admin email) already exists. Nothing to do.")
+        print("The demo school (or its admin login) already exists. Nothing to do.")
         return 0
 
     print(
         f"Created '{DEMO_SCHOOL_NAME}' with {result['students']} students, "
         f"{result['marks']} marks, and {result['attendance']} attendance records."
     )
-    print(f"Log in with {DEMO_EMAIL} / {DEMO_PASSWORD}")
+    print(f"Log in with {DEMO_LOGIN} / {DEMO_PASSWORD}")
     return 0
 
 

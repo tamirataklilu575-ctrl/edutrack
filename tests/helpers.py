@@ -1,5 +1,9 @@
 """Small helper functions shared by the test files."""
 
+from werkzeug.security import generate_password_hash
+
+import app as app_module
+
 VALID_STUDENT = {
     "name": "Test Student",
     "grade": "9",
@@ -10,22 +14,29 @@ VALID_STUDENT = {
 }
 
 
-def register(client, email, password="secret123", school="Test School"):
-    """Register a new school and its admin account through the form."""
-    return client.post(
-        "/register",
-        data={
-            "school_name": school,
-            "email": email,
-            "password": password,
-            "confirm": password,
-        },
-    )
+def register(client, login_name, password="secret123", school="Test School"):
+    """Create a school and its admin account directly in the database.
+
+    There is no public registration page any more, so tests create schools the
+    way the platform owner would. The ``client`` argument is kept only so older
+    tests keep working; it is not used.
+    """
+    conn = app_module.get_db()
+    try:
+        with conn:
+            new_school_id = app_module.create_school(conn, school)
+            conn.execute(
+                "INSERT INTO users (login, password_hash, role, school_id) "
+                "VALUES (?, ?, 'admin', ?)",
+                (login_name.strip().lower(), generate_password_hash(password), new_school_id),
+            )
+    finally:
+        conn.close()
 
 
-def login(client, email, password="secret123"):
+def login(client, login_name, password="secret123"):
     """Log in through the form."""
-    return client.post("/login", data={"email": email, "password": password})
+    return client.post("/login", data={"login": login_name, "password": password})
 
 
 def load_sample(client):
@@ -33,9 +44,11 @@ def load_sample(client):
     return client.post("/sample-data")
 
 
-def add_teacher(admin_client, email, password="secret123"):
+def add_teacher(admin_client, login_name, password="secret123"):
     """Create a teacher account from the signed-in admin's Users page."""
-    return admin_client.post("/users/add", data={"email": email, "password": password})
+    return admin_client.post(
+        "/users/add", data={"login": login_name, "password": password}
+    )
 
 
 def student_data(**overrides):

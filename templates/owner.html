@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Schools{% endblock %}
+
+{% block content %}
+<header class="page-header">
+    <h2>Schools</h2>
+    <p>Create a school and its first administrator. You see only counts here, never student or teacher records.</p>
+</header>
+
+<section class="panel section-gap form-panel wide-panel">
+    <h3>Create a School</h3>
+    <form method="POST" novalidate>
+        <div class="form-group {{ 'has-error' if errors.school_name }}">
+            <label for="school_name">School Name</label>
+            <input type="text" id="school_name" name="school_name" value="{{ form.school_name }}">
+            {% if errors.school_name %}<span class="error-text">{{ errors.school_name }}</span>{% endif %}
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.login }}">
+            <label for="login">Admin login (email or username)</label>
+            <input type="text" id="login" name="login" value="{{ form.login }}"
+                   autocomplete="off" autocapitalize="none">
+            {% if errors.login %}<span class="error-text">{{ errors.login }}</span>{% endif %}
+        </div>
+
+        <div class="form-group {{ 'has-error' if errors.password }}">
+            <label for="password">Admin password</label>
+            <input type="password" id="password" name="password" autocomplete="new-password">
+            {% if errors.password %}<span class="error-text">{{ errors.password }}</span>{% endif %}
+        </div>
+
+        <button type="submit" class="btn">Create School</button>
+    </form>
+</section>
+
+<section class="panel">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>School</th>
+                <th>Students</th>
+                <th>Users</th>
+                <th>Administrators</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for school in schools %}
+            <tr>
+                <td>{{ school.id }}</td>
+                <td>{{ school.name }}</td>
+                <td>{{ school.students }}</td>
+                <td>{{ school.users }}</td>
+                <td>
+                    {% for admin in school.admins %}
+                    <div class="user-actions admin-line">
+                        <span>
+                            {{ admin.login }}
+                            {% if not admin.active %}<span class="badge badge-inactive">Disabled</span>{% endif %}
+                        </span>
+                        <form method="POST" action="{{ url_for('owner_reset_admin_password', user_id=admin.id) }}" class="inline-form">
+                            <input type="password" name="password" placeholder="New password"
+                                   autocomplete="new-password" required>
+                            <button type="submit" class="btn btn-small">Reset Password</button>
+                        </form>
+                    </div>
+                    {% else %}
+                    —
+                    {% endfor %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">No schools yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

@@ -5,15 +5,16 @@
 {% block content %}
 <header class="page-header">
     <h2>Users</h2>
-    <p>People who can sign in to {{ current_user.school_name }}. Admins manage students and users; teachers take attendance and enter marks.</p>
+    <p>People who can sign in to {{ current_user.school_name }}. Teachers cannot change their own login or password; you manage that here.</p>
 </header>
 
 <section class="panel section-gap">
     <h3>Add a Teacher</h3>
-    <p class="muted-note">Choose a first password and share it with the teacher. They can change it under Account.</p>
+    <p class="muted-note">Use an email or a username (for example <em>abebe.k</em>), plus a first password. Share both with the teacher.</p>
     <form method="POST" action="{{ url_for('add_user') }}" class="search-form filter-wrap">
-        <input type="email" name="email" placeholder="teacher@example.com" required>
-        <input type="password" name="password" placeholder="First password (6+ characters)"
+        <input type="text" name="login" placeholder="Email or username"
+               autocomplete="off" autocapitalize="none" required>
+        <input type="password" name="password" placeholder="Password (6+ characters)"
                autocomplete="new-password" required>
         <button type="submit" class="btn">Add Teacher</button>
     </form>
@@ -24,8 +25,9 @@
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Email</th>
+                <th>Login</th>
                 <th>Role</th>
+                <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -34,7 +36,7 @@
             <tr>
                 <td>{{ user.id }}</td>
                 <td>
-                    {{ user.email }}
+                    {{ user.login }}
                     {% if user.id == current_user.id %}<span class="you-tag">(you)</span>{% endif %}
                 </td>
                 <td>
@@ -43,16 +45,39 @@
                     </span>
                 </td>
                 <td>
+                    <span class="badge {{ 'badge-active' if user.active else 'badge-inactive' }}">
+                        {{ 'Active' if user.active else 'Disabled' }}
+                    </span>
+                </td>
+                <td>
                     {% if user.id != current_user.id %}
-                    <form method="POST" action="{{ url_for('change_role', user_id=user.id) }}">
-                        {% if user.role == 'admin' %}
-                        <input type="hidden" name="role" value="teacher">
-                        <button type="submit" class="btn btn-small">Make Teacher</button>
-                        {% else %}
-                        <input type="hidden" name="role" value="admin">
-                        <button type="submit" class="btn btn-small">Make Admin</button>
-                        {% endif %}
-                    </form>
+                    <div class="user-actions">
+                        <form method="POST" action="{{ url_for('reset_user_password', user_id=user.id) }}" class="inline-form">
+                            <input type="password" name="password" placeholder="New password"
+                                   autocomplete="new-password" required>
+                            <button type="submit" class="btn btn-small">Reset Password</button>
+                        </form>
+
+                        <form method="POST" action="{{ url_for('change_role', user_id=user.id) }}">
+                            {% if user.role == 'admin' %}
+                            <input type="hidden" name="role" value="teacher">
+                            <button type="submit" class="btn btn-small btn-outline">Make Teacher</button>
+                            {% else %}
+                            <input type="hidden" name="role" value="admin">
+                            <button type="submit" class="btn btn-small btn-outline">Make Admin</button>
+                            {% endif %}
+                        </form>
+
+                        <form method="POST" action="{{ url_for('set_user_active', user_id=user.id) }}">
+                            {% if user.active %}
+                            <input type="hidden" name="active" value="0">
+                            <button type="submit" class="btn btn-small btn-danger">Disable</button>
+                            {% else %}
+                            <input type="hidden" name="active" value="1">
+                            <button type="submit" class="btn btn-small">Enable</button>
+                            {% endif %}
+                        </form>
+                    </div>
                     {% else %}
                     —
                     {% endif %}

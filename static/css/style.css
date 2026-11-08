@@ -762,3 +762,31 @@ th {
     font-size: 0.85rem;
     word-break: break-word;
 }
+/* Users and owner pages */
+.user-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.inline-form {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.inline-form input {
+    width: 140px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.admin-line {
+    margin-bottom: 6px;
+}
+
+.wide-panel {
+    max-width: 560px;
+}

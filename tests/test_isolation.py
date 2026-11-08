@@ -203,7 +203,7 @@ def test_cannot_change_a_role_in_another_school(two_schools):
 def test_teacher_added_by_one_school_belongs_to_that_school(two_schools):
     alice, bob = two_schools
 
-    alice.post("/users/add", data={"email": "t@example.com", "password": "secret123"})
+    alice.post("/users/add", data={"login": "t@example.com", "password": "secret123"})
 
     assert b"t@example.com" in alice.get("/users").data
     assert b"t@example.com" not in bob.get("/users").data

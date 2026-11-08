@@ -10,6 +10,9 @@ from helpers import add_teacher, load_sample, login, register
 def use_sqlite_for_tests(monkeypatch):
     """Always run tests on a temporary SQLite database, never on PostgreSQL."""
     monkeypatch.setattr(app_module, "DATABASE_URL", "")
+    # A developer's own owner settings must never leak into the tests.
+    monkeypatch.setattr(app_module, "OWNER_LOGIN", "")
+    monkeypatch.setattr(app_module, "OWNER_PASSWORD", "")
 
 
 @pytest.fixture
@@ -41,8 +44,12 @@ def auth_client(client):
 
 
 @pytest.fixture
-def teacher_client(db_path):
-    """A client signed in as a teacher of the same school as the admin."""
+def admin_and_teacher(db_path):
+    """Two signed-in clients from the same school: its admin and one teacher.
+
+    The admin is boss@example.com and the teacher is teacher@example.com. The
+    school has the sample students (IDs 1 to 5).
+    """
     admin = app_module.app.test_client()
     teacher = app_module.app.test_client()
 
@@ -51,7 +58,13 @@ def teacher_client(db_path):
     load_sample(admin)
     add_teacher(admin, "teacher@example.com")
     login(teacher, "teacher@example.com")
-    return teacher
+    return admin, teacher
+
+
+@pytest.fixture
+def teacher_client(admin_and_teacher):
+    """A client signed in as a teacher of the same school as the admin."""
+    return admin_and_teacher[1]
 
 
 @pytest.fixture
@@ -74,3 +87,19 @@ def two_schools(db_path):
     load_sample(bob)
 
     return alice, bob
+
+
+OWNER_LOGIN = "owner"
+OWNER_PASSWORD = "ownerpass1"
+
+
+@pytest.fixture
+def owner_client(db_path, monkeypatch):
+    """A client signed in as the platform owner."""
+    monkeypatch.setattr(app_module, "OWNER_LOGIN", OWNER_LOGIN)
+    monkeypatch.setattr(app_module, "OWNER_PASSWORD", OWNER_PASSWORD)
+    app_module.init_db()
+
+    owner = app_module.app.test_client()
+    login(owner, OWNER_LOGIN, OWNER_PASSWORD)
+    return owner

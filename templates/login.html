@@ -7,14 +7,15 @@
     <section class="panel form-panel">
         <header class="page-header">
             <h2>Log In</h2>
-            <p>Sign in to manage your school.</p>
+            <p>Sign in with the login your school administrator gave you.</p>
         </header>
 
         <form method="POST">
             <div class="form-group">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email"
-                       value="{{ form.email }}" autocomplete="email" autofocus>
+                <label for="login">Email or username</label>
+                <input type="text" id="login" name="login"
+                       value="{{ form.login }}" autocomplete="username"
+                       autocapitalize="none" autofocus>
             </div>
 
             <div class="form-group">
@@ -27,7 +28,8 @@
         </form>
 
         <p class="auth-switch">
-            New school? <a href="{{ url_for('register') }}">Register your school</a>
+            Accounts are created by your school administrator.
+            Forgot your password? Ask them to reset it.
         </p>
     </section>
 </div>

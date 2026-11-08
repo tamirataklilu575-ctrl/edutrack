@@ -12,7 +12,7 @@ from helpers import (
     student_data,
 )
 
-TEST_EMAIL = "tester@example.com"
+TEST_LOGIN = "tester@example.com"
 
 
 def add_second_student(client):
@@ -35,102 +35,67 @@ def test_students_requires_login(client):
     assert "/login" in response.headers["Location"]
 
 
-def test_register_success(client):
+def test_public_registration_no_longer_exists(client):
+    assert client.get("/register").status_code == 404
     response = client.post(
         "/register",
-        data={
-            "school_name": "Green Valley High",
-            "email": "newuser@example.com",
-            "password": "secret123",
-            "confirm": "secret123",
-        },
-        follow_redirects=True,
+        data={"school_name": "Sneaky", "login": "x@example.com", "password": "secret123"},
     )
-    assert b"School created!" in response.data
+    assert response.status_code == 404
 
 
-def test_register_password_mismatch(client):
-    response = client.post(
-        "/register",
-        data={
-            "school_name": "Green Valley High",
-            "email": "newuser@example.com",
-            "password": "secret123",
-            "confirm": "different",
-        },
-    )
-    assert b"Passwords do not match." in response.data
-
-
-def test_register_short_password(client):
-    response = client.post(
-        "/register",
-        data={
-            "school_name": "Green Valley High",
-            "email": "newuser@example.com",
-            "password": "123",
-            "confirm": "123",
-        },
-    )
-    assert b"at least 6 characters" in response.data
-
-
-def test_register_invalid_email(client):
-    response = client.post(
-        "/register",
-        data={
-            "school_name": "Green Valley High",
-            "email": "not-an-email",
-            "password": "secret123",
-            "confirm": "secret123",
-        },
-    )
-    assert b"Enter a valid email address." in response.data
-
-
-def test_register_duplicate_email(client):
-    register(client, "dup@example.com")
-    response = register(client, "dup@example.com")
-    assert b"already registered" in response.data
-
-
-def test_register_duplicate_email_ignores_letter_case(client):
-    register(client, "Dup@Example.com")
-    response = register(client, "dup@example.com")
-    assert b"already registered" in response.data
+def test_login_page_has_no_register_link(client):
+    assert b"/register" not in client.get("/login").data
 
 
 def test_login_success(client):
-    register(client, TEST_EMAIL)
+    register(client, TEST_LOGIN)
     response = client.post(
         "/login",
-        data={"email": TEST_EMAIL, "password": "secret123"},
+        data={"login": TEST_LOGIN, "password": "secret123"},
         follow_redirects=True,
     )
     assert b"Welcome back, tester@example.com!" in response.data
 
 
-def test_login_email_ignores_letter_case(client):
+def test_login_with_a_username(client):
+    register(client, "abebe.k")
+    response = client.post(
+        "/login",
+        data={"login": "abebe.k", "password": "secret123"},
+        follow_redirects=True,
+    )
+    assert b"Welcome back, abebe.k!" in response.data
+
+
+def test_login_ignores_letter_case_and_spaces(client):
     register(client, "Mixed@Example.com")
     response = client.post(
         "/login",
-        data={"email": "MIXED@example.com", "password": "secret123"},
+        data={"login": "  MIXED@example.com ", "password": "secret123"},
         follow_redirects=True,
     )
     assert b"Welcome back, mixed@example.com!" in response.data
 
 
 def test_login_wrong_password(client):
-    register(client, TEST_EMAIL)
+    register(client, TEST_LOGIN)
     response = client.post(
-        "/login", data={"email": TEST_EMAIL, "password": "wrongpass"}
+        "/login", data={"login": TEST_LOGIN, "password": "wrongpass"}
     )
-    assert b"Invalid email or password." in response.data
+    assert b"Invalid login or password." in response.data
+
+
+def test_unknown_login_gets_the_same_message(client):
+    response = client.post(
+        "/login", data={"login": "nobody@example.com", "password": "secret123"}
+    )
+    assert b"Invalid login or password." in response.data
 
 
 def test_login_session_cookie_is_persistent(client):
-    register(client, TEST_EMAIL)
-    response = login(client, TEST_EMAIL)
+    register(client, TEST_LOGIN)
+    response = login(client, TEST_LOGIN)
     cookies = response.headers.getlist("Set-Cookie")
     # A cookie with an expiry date survives closing the browser.
     assert any("Expires=" in cookie for cookie in cookies)
@@ -142,7 +107,7 @@ def test_logout(auth_client):
     assert auth_client.get("/").status_code == 302
 
 
-def test_old_username_users_table_is_replaced(tmp_path, monkeypatch):
+def test_very_old_username_only_users_table_is_replaced(tmp_path, monkeypatch):
     db_path = tmp_path / "old.db"
     monkeypatch.setattr(app_module, "DATABASE", db_path)
 
@@ -158,7 +123,7 @@ def test_old_username_users_table_is_replaced(tmp_path, monkeypatch):
     check = sqlite3.connect(db_path)
     columns = [row[1] for row in check.execute("PRAGMA table_info(users)")]
     check.close()
-    assert "email" in columns
+    assert "login" in columns
     assert "username" not in columns
 
 
@@ -346,7 +311,7 @@ def test_delete_student_with_marks(auth_client):
 # --------------------------------------------------------------------- Roles
 
 
-def test_registering_makes_you_admin_of_your_own_school(auth_client):
+def test_school_creator_is_admin_of_their_school(auth_client):
     response = auth_client.get("/users")
     assert response.status_code == 200
     assert b"Admin" in response.data

@@ -10,6 +10,13 @@
     {% if current_user %}
     <aside class="sidebar">
         <h1 class="logo">🎓 EduTrack</h1>
+        {% if current_user.role == 'owner' %}
+        <p class="school-name">Platform owner</p>
+        <nav>
+            <a href="{{ url_for('owner_home') }}"
+               class="nav-link {{ 'active' if request.endpoint == 'owner_home' }}">Schools</a>
+        </nav>
+        {% else %}
         <p class="school-name">{{ current_user.school_name }}</p>
         <nav>
             <a href="{{ url_for('dashboard') }}"
@@ -29,14 +36,17 @@
                class="nav-link {{ 'active' if request.endpoint == 'export_page' }}">Export</a>
             {% endif %}
         </nav>
+        {% endif %}
 
         <div class="sidebar-user">
             <span class="user-name">
-                👤 {{ current_user.email }}
+                👤 {{ current_user.login }}
                 <small class="role-tag">{{ current_user.role }}</small>
             </span>
+            {% if current_user.role != 'owner' %}
             <a href="{{ url_for('account') }}"
                class="nav-link {{ 'active' if request.endpoint == 'account' }}">Account</a>
+            {% endif %}
             <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
                 <button type="submit" class="nav-link">Log out</button>
             </form>

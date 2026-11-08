@@ -45,7 +45,7 @@ def test_seed_admin_can_log_in_and_sees_the_demo_school(db_path):
     seed.seed_demo_data(today=TODAY)
 
     client = app_module.app.test_client()
-    response = login(client, seed.DEMO_EMAIL, seed.DEMO_PASSWORD)
+    response = login(client, seed.DEMO_LOGIN, seed.DEMO_PASSWORD)
 
     assert response.status_code == 302
     assert b"Demo School" in client.get("/").data

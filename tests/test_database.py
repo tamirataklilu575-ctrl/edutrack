@@ -30,7 +30,7 @@ def test_using_postgres_follows_database_url(monkeypatch):
 
 
 def test_connection_commits_on_success_and_rolls_back_on_error(db_path):
-    insert = "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)"
+    insert = "INSERT INTO users (login, password_hash, role) VALUES (?, ?, ?)"
     conn = app_module.get_db()
 
     with conn:
@@ -41,7 +41,7 @@ def test_connection_commits_on_success_and_rolls_back_on_error(db_path):
             conn.execute(insert, ("lose@example.com", "hash", "teacher"))
             raise RuntimeError("something went wrong")
 
-    emails = [row["email"] for row in conn.execute("SELECT email FROM users").fetchall()]
+    emails = [row["login"] for row in conn.execute("SELECT login FROM users").fetchall()]
     conn.close()
 
     assert emails == ["keep@example.com"]

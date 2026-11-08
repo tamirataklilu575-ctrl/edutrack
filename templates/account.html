@@ -5,9 +5,10 @@
 {% block content %}
 <header class="page-header">
     <h2>Account</h2>
-    <p>Signed in as {{ current_user.email }} ({{ current_user.role }}) at {{ current_user.school_name }}.</p>
+    <p>Signed in as {{ current_user.login }} ({{ current_user.role }}) at {{ current_user.school_name }}.</p>
 </header>
 
+{% if can_change %}
 <section class="panel form-panel">
     <h3>Change Password</h3>
     <form method="POST" novalidate>
@@ -35,4 +36,13 @@
         <button type="submit" class="btn">Change Password</button>
     </form>
 </section>
+{% else %}
+<section class="panel">
+    <h3>Login details</h3>
+    <p class="muted-note">
+        Your login and password are managed by your school administrator.
+        If you need a new password, please ask them to reset it.
+    </p>
+</section>
+{% endif %}
 {% endblock %}
